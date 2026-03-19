@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  api:
+    build: 
+      context: ./api
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    volumes:
+      - ./api/src:/usr/src/app/src
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ari
+      POSTGRES_PASSWORD: ari_password
+      POSTGRES_DB: ari_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  n8n:
+    image: n8nio/n8n:latest
+    ports:
+      - "5678:5678"
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=ari_db
+      - DB_POSTGRESDB_USER=ari
+      - DB_POSTGRESDB_PASSWORD=ari_password
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
