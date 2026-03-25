@@ -283,7 +283,13 @@ app.post('/webhook', async (req, res) => {
           
           if (value && value.messages && value.messages.length > 0) {
             const message = value.messages[0];
-            const from = message.from;
+            let from = message.from;
+            
+            // [FIX] México: Webhooks mandan "521" pero el Allowed List de Meta pide "52"
+            if (from.startsWith('521') && from.length === 13) {
+              from = '52' + from.substring(3);
+            }
+
             const messageId = message.id;
 
             console.log(`\n--- NUEVO MSG RECIBIDO DE ${from} ---`);
