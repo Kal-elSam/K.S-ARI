@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { getAppointments, type Appointment } from "@/lib/api";
 
 type WeekDay = "Lunes" | "Martes" | "Miércoles" | "Jueves" | "Viernes";
@@ -14,6 +14,54 @@ interface AppointmentCard {
   hour: string;
   service: string;
   phone: string;
+}
+
+/**
+ * Un solo control "Acciones" con menú desplegable (sin librerías).
+ * Cierra el menú al elegir una opción.
+ */
+function AppointmentActionsMenu() {
+  const closeDetails = (event: MouseEvent<HTMLElement>) => {
+    const details = event.currentTarget.closest("details");
+    details?.removeAttribute("open");
+  };
+
+  return (
+    <details className="group relative mt-4">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-lg border border-white/15 bg-white/[0.06] px-3 py-2 text-xs font-medium text-slate-200 shadow-sm transition hover:border-white/25 hover:bg-white/10 [&::-webkit-details-marker]:hidden">
+        <span>Acciones</span>
+        <span
+          aria-hidden
+          className="text-[10px] text-slate-500 transition group-open:rotate-180 group-open:text-slate-400"
+        >
+          ▾
+        </span>
+      </summary>
+      <div className="absolute left-0 right-0 z-30 mt-1 overflow-hidden rounded-lg border border-white/10 bg-[#0d0f14] py-1 shadow-xl ring-1 ring-black/50">
+        <button
+          type="button"
+          onClick={closeDetails}
+          className="flex w-full items-center px-3 py-2 text-left text-xs font-medium text-emerald-200 transition hover:bg-emerald-500/15 focus-visible:outline-none focus-visible:bg-emerald-500/20"
+        >
+          Confirmar
+        </button>
+        <button
+          type="button"
+          onClick={closeDetails}
+          className="flex w-full items-center px-3 py-2 text-left text-xs font-medium text-red-200 transition hover:bg-red-500/15 focus-visible:outline-none focus-visible:bg-red-500/20"
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          onClick={closeDetails}
+          className="flex w-full items-center px-3 py-2 text-left text-xs font-medium text-amber-200 transition hover:bg-amber-500/15 focus-visible:outline-none focus-visible:bg-amber-500/20"
+        >
+          Reagendar
+        </button>
+      </div>
+    </details>
+  );
 }
 
 function getDayNameFromISO(isoValue: string): WeekDay | null {
@@ -170,26 +218,7 @@ export default function AgendaPage() {
                         <p className="text-sm font-semibold text-white">{appointment.hour}</p>
                         <p className="mt-1 text-sm text-slate-200">{appointment.service}</p>
                         <p className="mt-1 text-xs text-slate-400">{appointment.phone}</p>
-                        <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                          <button
-                            type="button"
-                            className="rounded-md bg-emerald-500/20 px-2 py-1 font-medium text-emerald-200 hover:bg-emerald-500/30"
-                          >
-                            Confirmar
-                          </button>
-                          <button
-                            type="button"
-                            className="rounded-md bg-red-500/20 px-2 py-1 font-medium text-red-200 hover:bg-red-500/30"
-                          >
-                            Cancelar
-                          </button>
-                          <button
-                            type="button"
-                            className="rounded-md bg-amber-500/20 px-2 py-1 font-medium text-amber-200 hover:bg-amber-500/30"
-                          >
-                            Reagendar
-                          </button>
-                        </div>
+                        <AppointmentActionsMenu />
                       </div>
                     ))
                   )}
