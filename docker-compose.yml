@@ -7,6 +7,9 @@ services:
       - "3000:3000"
     env_file:
       - .env
+    # Dentro del contenedor, Postgres no es localhost sino el servicio "postgres".
+    environment:
+      DATABASE_URL: postgres://ari:ari_password@postgres:5432/ari_db
     volumes:
       - ./api/src:/usr/src/app/src
     depends_on:
