@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getConversations, getMessages, type Conversation, type ConversationStatus, type Message } from "@/lib/api";
 
 type Sender = "bot" | "user";
@@ -76,13 +76,17 @@ export default function InboxPage() {
   const [errorMessages, setErrorMessages] = useState<string>("");
   const [manualMessage, setManualMessage] = useState<string>("");
   const [isManualControl, setIsManualControl] = useState<boolean>(false);
+  const [highlightedConversationIds, setHighlightedConversationIds] = useState<string[]>([]);
+  const previousConversationIdsRef = useRef<Set<string>>(new Set());
+  const highlightTimeoutsRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     let isMounted = true;
 
-    const loadConversations = async () => {
-      setIsLoadingConversations(true);
-      setErrorConversations("");
+    const loadConversations = async (showSkeleton: boolean) => {
+      if (showSkeleton) {
+        setIsLoadingConversations(true);
+      }
 
       try {
         const data = await getConversations();
@@ -90,24 +94,69 @@ export default function InboxPage() {
           return;
         }
 
-        setConversations(data);
-        if (data.length > 0) {
-          setSelectedId(data[0].id);
+        const previousIds = previousConversationIdsRef.current;
+        const incomingIds = new Set(data.map((conversation) => conversation.id));
+        const newConversationIds =
+          previousIds.size === 0
+            ? []
+            : data
+                .filter((conversation) => !previousIds.has(conversation.id))
+                .map((conversation) => conversation.id);
+
+        if (newConversationIds.length > 0) {
+          setHighlightedConversationIds((currentIds) =>
+            Array.from(new Set([...currentIds, ...newConversationIds]))
+          );
+
+          // Se limpia cada resaltado en 2s para mantener señal visual breve.
+          newConversationIds.forEach((conversationId) => {
+            const existingTimeout = highlightTimeoutsRef.current[conversationId];
+            if (existingTimeout) {
+              window.clearTimeout(existingTimeout);
+            }
+
+            highlightTimeoutsRef.current[conversationId] = window.setTimeout(() => {
+              setHighlightedConversationIds((currentIds) =>
+                currentIds.filter((currentId) => currentId !== conversationId)
+              );
+              delete highlightTimeoutsRef.current[conversationId];
+            }, 2_000);
+          });
         }
+
+        previousConversationIdsRef.current = incomingIds;
+        setConversations(data);
+        setSelectedId((currentId) => {
+          if (currentId && data.some((conversation) => conversation.id === currentId)) {
+            return currentId;
+          }
+          return data[0]?.id || "";
+        });
+        setErrorConversations("");
       } catch {
         if (isMounted) {
           setErrorConversations("No se pudieron cargar las conversaciones");
         }
       } finally {
-        if (isMounted) {
+        if (isMounted && showSkeleton) {
           setIsLoadingConversations(false);
         }
       }
     };
 
-    loadConversations();
+    // Primer fetch + polling cada 15s para refrescar inbox.
+    void loadConversations(true);
+    const conversationsIntervalId = window.setInterval(() => {
+      void loadConversations(false);
+    }, 15_000);
+
     return () => {
       isMounted = false;
+      window.clearInterval(conversationsIntervalId);
+      Object.values(highlightTimeoutsRef.current).forEach((timeoutId) => {
+        window.clearTimeout(timeoutId);
+      });
+      highlightTimeoutsRef.current = {};
     };
   }, []);
 
@@ -170,14 +219,20 @@ export default function InboxPage() {
                 ))
               : conversations.map((conversation) => (
                   <li key={conversation.id}>
+                    {(() => {
+                      const isSelected = selectedId === conversation.id;
+                      const isHighlighted = highlightedConversationIds.includes(conversation.id);
+                      const conversationClass = isSelected
+                        ? "border-ari-accent bg-ari-accent/10"
+                        : isHighlighted
+                          ? "border-violet-400 bg-violet-500/10"
+                          : "border-white/10 bg-white/5 hover:border-white/20";
+
+                      return (
                     <button
                       type="button"
                       onClick={() => setSelectedId(conversation.id)}
-                      className={`w-full rounded-lg border p-3 text-left transition ${
-                        selectedId === conversation.id
-                          ? "border-ari-accent bg-ari-accent/10"
-                          : "border-white/10 bg-white/5 hover:border-white/20"
-                      }`}
+                      className={`w-full rounded-lg border p-3 text-left transition ${conversationClass}`}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <p className="font-medium text-white">{conversation.phone}</p>
@@ -191,6 +246,8 @@ export default function InboxPage() {
                       </div>
                       <p className="mt-1 text-xs text-slate-400">{conversation.business_id}</p>
                     </button>
+                      );
+                    })()}
                   </li>
                 ))}
           </ul>

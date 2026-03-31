@@ -25,35 +25,63 @@ export default function MetricsPage() {
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>("");
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
+  const [secondsSinceUpdate, setSecondsSinceUpdate] = useState<number>(0);
 
   useEffect(() => {
     let isMounted = true;
 
-    const loadMetrics = async () => {
-      setIsLoading(true);
-      setError("");
-
+    const loadMetrics = async (showSkeleton: boolean) => {
+      if (showSkeleton) {
+        setIsLoading(true);
+      }
       try {
         const data = await getMetrics();
         if (isMounted) {
           setMetrics(data);
+          setLastUpdatedAt(Date.now());
+          setSecondsSinceUpdate(0);
+          setError("");
         }
       } catch {
         if (isMounted) {
           setError("No se pudieron cargar las métricas");
         }
       } finally {
-        if (isMounted) {
+        if (isMounted && showSkeleton) {
           setIsLoading(false);
         }
       }
     };
 
-    loadMetrics();
+    // Primer fetch con skeleton y luego polling cada 30 segundos.
+    void loadMetrics(true);
+    const metricsIntervalId = window.setInterval(() => {
+      void loadMetrics(false);
+    }, 30_000);
+
     return () => {
       isMounted = false;
+      window.clearInterval(metricsIntervalId);
     };
   }, []);
+
+  useEffect(() => {
+    if (!lastUpdatedAt) {
+      setSecondsSinceUpdate(0);
+      return;
+    }
+
+    // Actualiza contador local sin volver a pedir métricas.
+    const secondsIntervalId = window.setInterval(() => {
+      const diffInSeconds = Math.floor((Date.now() - lastUpdatedAt) / 1000);
+      setSecondsSinceUpdate(diffInSeconds);
+    }, 1000);
+
+    return () => {
+      window.clearInterval(secondsIntervalId);
+    };
+  }, [lastUpdatedAt]);
 
   const kpis: Kpi[] = metrics
     ? [
@@ -113,6 +141,9 @@ export default function MetricsPage() {
               </article>
             ))}
       </div>
+      <p className="text-xs text-slate-400">
+        {lastUpdatedAt ? `Actualizado hace ${secondsSinceUpdate} segundos` : "Actualizando..."}
+      </p>
 
       <article className="overflow-hidden rounded-xl border border-white/10 bg-ari-card">
         <header className="border-b border-white/10 px-4 py-3">

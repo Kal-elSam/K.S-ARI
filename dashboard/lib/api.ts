@@ -1,4 +1,4 @@
-export const BASE_URL = "http://localhost:3000";
+export const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
 
 export type ConversationStatus =
   | "NEW_LEAD"
@@ -58,12 +58,14 @@ export interface BusinessConfig {
   id?: string;
   business_id?: string;
   name: string;
+  slogan: string;
   type: string;
   start_hour: number;
   end_hour: number;
   tone: string;
   welcome_message: string;
   active_announcement: string | null;
+  accent_color?: string;
   services: BusinessService[];
   created_at?: string;
   updated_at?: string;

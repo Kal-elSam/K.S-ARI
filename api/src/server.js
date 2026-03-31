@@ -148,16 +148,56 @@ async function updateConversationContext(id, newContext) {
 }
 
 /**
- * Construye un listado de servicios legible para el prompt.
+ * Construye el system prompt dinámico usando toda la configuración del negocio.
+ * Se consulta DB en cada mensaje para reflejar cambios del panel inmediatamente.
  */
-function buildServicesText(services) {
-  if (!Array.isArray(services) || services.length === 0) {
-    return 'Sin servicios configurados';
-  }
+async function buildSystemPrompt(businessId, state) {
+  const config = await getBusinessConfig(businessId);
+  const safeServices = Array.isArray(config.services) ? config.services : [];
+  const serviciosTexto = safeServices.length
+    ? safeServices
+        .map((service) => `${service.name || 'Servicio'} ($${service.price ?? 'N/A'}, ${service.duration ?? 'N/A'} min)`)
+        .join(', ')
+    : 'Sin servicios configurados';
 
-  return services
-    .map((service) => `${service.name || 'Servicio'} $${service.price ?? 'N/A'}`)
-    .join(', ');
+  const base = `Eres ARI, asistente virtual de ${config.name}.
+${config.slogan ? `Slogan del negocio: "${config.slogan}".` : ''}
+Servicios disponibles: ${serviciosTexto}.
+Horario de atención: ${config.start_hour}:00 a ${config.end_hour}:00 hrs.
+Tono de comunicación: ${config.tone}.
+${config.active_announcement ? `⚠️ Anuncio importante: ${config.active_announcement}` : ''}
+
+Reglas importantes:
+- Siempre responde en español
+- Sé conciso, máximo 3 oraciones por mensaje
+- Tu objetivo es agendar citas, no solo informar
+- Nunca inventes servicios o precios que no estén en tu lista`;
+
+  const statePrompts = {
+    NEW_LEAD: `${base}
+Tu misión ahora: saludar con el mensaje de bienvenida configurado y preguntar en qué puedes ayudar.
+Mensaje de bienvenida a usar: "${config.welcome_message || 'Hola, ¿en qué te puedo ayudar?'}"`,
+
+    QUALIFYING: `${base}
+Tu misión ahora: entender qué servicio necesita el cliente.
+Cuando tengas claro el servicio, incluye exactamente "READY_TO_BOOK" en tu respuesta.
+Máximo 2 preguntas antes de avanzar.`,
+
+    READY_TO_BOOK: `${base}
+Tu misión ahora: mostrar disponibilidad y confirmar la cita.
+El cliente quiere agendar — sé directo y eficiente.`,
+
+    BOOKED: `${base}
+Tu misión ahora: la cita ya está agendada.
+Confirma calurosamente, menciona la hora si la tienes en contexto, despídete.
+No ofrezcas más servicios ni hagas preguntas innecesarias.`,
+
+    FOLLOW_UP: `${base}
+Tu misión ahora: reactivar al cliente que no completó su cita.
+Sé amigable y ofrece reagendar.`,
+  };
+
+  return statePrompts[state] || base;
 }
 
 /**
@@ -168,6 +208,7 @@ function getDefaultBusinessConfig(businessId) {
   return {
     business_id: businessId,
     name: 'Negocio ARI',
+    slogan: '',
     type: 'general',
     start_hour: 9,
     end_hour: 18,
@@ -201,22 +242,6 @@ async function getBusinessConfig(businessId) {
     console.error('[ERROR DB] No se pudo leer business_config:', error.message);
     return getDefaultBusinessConfig(businessId);
   }
-}
-
-/**
- * Construye el prompt base dinámico según la configuración del negocio.
- */
-function buildDynamicBusinessPrompt(config) {
-  const servicesText = buildServicesText(config.services);
-  const announcementText = config.active_announcement
-    ? `Anuncio activo: ${config.active_announcement}`
-    : '';
-
-  return `Eres ARI, asistente virtual de ${config.name}.
-Servicios disponibles: ${servicesText}.
-Horario: ${config.start_hour}am a ${config.end_hour}pm.
-Tono: ${config.tone}.
-${announcementText}`;
 }
 
 // ----------------------------------------------------------------------------
@@ -862,6 +887,7 @@ app.post('/api/config/:businessId', async (req, res) => {
     const { businessId } = req.params;
     const {
       name,
+      slogan,
       type,
       start_hour,
       end_hour,
@@ -877,12 +903,13 @@ app.post('/api/config/:businessId', async (req, res) => {
 
     const query = `
       INSERT INTO business_config (
-        business_id, name, type, start_hour, end_hour, tone, welcome_message, active_announcement, services
+        business_id, name, slogan, type, start_hour, end_hour, tone, welcome_message, active_announcement, services
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
       ON CONFLICT (business_id) DO UPDATE
       SET
         name = EXCLUDED.name,
+        slogan = EXCLUDED.slogan,
         type = EXCLUDED.type,
         start_hour = EXCLUDED.start_hour,
         end_hour = EXCLUDED.end_hour,
@@ -897,6 +924,7 @@ app.post('/api/config/:businessId', async (req, res) => {
     const values = [
       businessId,
       name,
+      slogan || '',
       type,
       start_hour,
       end_hour,
@@ -1196,42 +1224,7 @@ async function handleSlotSelection(convId, from, businessId, context, userMessag
  * Consulta a Groq para generar la respuesta y avanza el estado si corresponde.
  */
 async function handleGeneralState(convId, from, businessId, currentState, userMessage) {
-  const businessConfig = await getBusinessConfig(businessId);
-  const dynamicBusinessPrompt = buildDynamicBusinessPrompt(businessConfig);
-  let systemPrompt = '';
-
-  if (currentState === 'NEW_LEAD') {
-    systemPrompt = `${dynamicBusinessPrompt}
-Tu único objetivo es saludar cordialmente y preguntar en qué puedes ayudar.
-Sé breve y amigable.`;
-  } else if (currentState === 'QUALIFYING') {
-    systemPrompt = `${dynamicBusinessPrompt}
-Tu objetivo es perfilar al cliente para agendar una cita.
-
-REGLAS DE CALIFICACIÓN:
-- Debes identificar CLARAMENTE cuál de nuestros servicios necesita el cliente.
-- Si el cliente hace comentarios no relacionados con nuestros servicios (ej. "Televisión"), redirígelo amablemente indicando exclusivamente los servicios que ofrecemos.
-- Haz un máximo de 2 preguntas antes de avanzar.
-
-REGLA DE TRANSICIÓN:
-Solo puedes incluir la frase exacta "READY_TO_BOOK" al final de tu respuesta SI Y SOLO SI se cumplen estas DOS condiciones confirmadas:
-1) Ya sabes exactamente qué servicio quiere de nuestra lista.
-2) El cliente ha confirmado que desea agendar.
-Si falta alguna de estas dos, NO incluyas "READY_TO_BOOK" bajo ningún escenario.`;
-  } else if (currentState === 'BOOKED') {
-    systemPrompt = `${dynamicBusinessPrompt}
-El cliente ya tiene una cita agendada exitosamente.
-
-REGLAS ESTRICTAS:
-- Si el cliente agradece o se despide, confirma calurosamente que su cita está lista y despídete amigablemente.
-- Si tienes en contexto la fecha y hora agendada, recuérdalas brevemente.
-- Si el cliente pregunta por otro servicio o algo nuevo, ofrécele agendar una nueva cita.
-- BAJO NINGUNA CIRCUNSTANCIA actúes como un asistente AI general; eres solo recepcionista cerrando la interacción.
-- Sé sumamente breve y no inicies otro tema de conversación.`;
-  } else {
-    systemPrompt = `${dynamicBusinessPrompt}
-Eres un asistente virtual amable y servicial.`;
-  }
+  const systemPrompt = await buildSystemPrompt(businessId, currentState);
 
   console.log('🧠 Consultando a Groq llama-3.3-70b-versatile...');
   let aiResponse = await callAI(systemPrompt, userMessage);

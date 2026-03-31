@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS business_config (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     business_id VARCHAR(100) NOT NULL UNIQUE,
     name VARCHAR(150) NOT NULL,
+    slogan VARCHAR(200),
     type VARCHAR(80) NOT NULL,
     start_hour INT NOT NULL,
     end_hour INT NOT NULL,
@@ -59,6 +60,7 @@ CREATE INDEX IF NOT EXISTS idx_business_config_business_id
 INSERT INTO business_config (
     business_id,
     name,
+    slogan,
     type,
     start_hour,
     end_hour,
@@ -70,6 +72,7 @@ INSERT INTO business_config (
 VALUES (
     'demo',
     'Clínica ARI Demo',
+    'Tu estilo, nuestra precisión',
     'consultorio',
     9,
     18,
@@ -84,6 +87,7 @@ VALUES (
 ON CONFLICT (business_id) DO UPDATE
 SET
     name = EXCLUDED.name,
+    slogan = EXCLUDED.slogan,
     type = EXCLUDED.type,
     start_hour = EXCLUDED.start_hour,
     end_hour = EXCLUDED.end_hour,
@@ -92,3 +96,6 @@ SET
     active_announcement = EXCLUDED.active_announcement,
     services = EXCLUDED.services,
     updated_at = CURRENT_TIMESTAMP;
+
+ALTER TABLE business_config
+    ADD COLUMN IF NOT EXISTS slogan VARCHAR(200);

@@ -5,7 +5,7 @@ import { getConfig, updateConfig, type BusinessConfig, type BusinessService } fr
 
 type BusinessType = "Consultorio" | "Barbería" | "Inmobiliaria" | "Taller";
 type BotTone = "Formal" | "Amigable" | "Muy casual";
-type SaveStatus = "idle" | "saving" | "success";
+type SaveStatus = "idle" | "saving" | "publishing" | "success" | "error";
 
 interface ServiceItem {
   id: string;
@@ -16,6 +16,9 @@ interface ServiceItem {
 
 const businessTypeOptions: BusinessType[] = ["Consultorio", "Barbería", "Inmobiliaria", "Taller"];
 const botToneOptions: BotTone[] = ["Formal", "Amigable", "Muy casual"];
+const accentColorOptions = ["#7c3aed", "#2563eb", "#0f766e", "#dc2626", "#d97706", "#475569"] as const;
+const saveSuccessText = "✅ Configuración guardada — ARI ya usa esta información";
+const defaultAccentColor = accentColorOptions[0];
 
 function apiTypeToUI(value: string): BusinessType {
   switch (value) {
@@ -94,6 +97,7 @@ function toServiceItem(service: BusinessService, index: number): ServiceItem {
 
 export default function SettingsPage() {
   const [businessName, setBusinessName] = useState<string>("Clínica ARI Demo");
+  const [slogan, setSlogan] = useState<string>("");
   const [businessType, setBusinessType] = useState<BusinessType>("Consultorio");
   const [startTime, setStartTime] = useState<string>("09:00");
   const [endTime, setEndTime] = useState<string>("19:00");
@@ -109,9 +113,11 @@ export default function SettingsPage() {
   const [activeAnnouncement, setActiveAnnouncement] = useState<string>(
     "Hoy hay 10% de descuento en limpiezas"
   );
+  const [accentColor, setAccentColor] = useState<string>(defaultAccentColor);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [isLoadingConfig, setIsLoadingConfig] = useState<boolean>(true);
   const [loadError, setLoadError] = useState<string>("");
+  const [lastPersistedConfig, setLastPersistedConfig] = useState<BusinessConfig | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -127,13 +133,22 @@ export default function SettingsPage() {
         }
 
         setBusinessName(config.name);
+        setSlogan(config.slogan || "");
         setBusinessType(apiTypeToUI(config.type));
         setStartTime(hourToTime(config.start_hour));
         setEndTime(hourToTime(config.end_hour));
         setBotTone(apiToneToUI(config.tone));
         setWelcomeMessage(config.welcome_message);
         setActiveAnnouncement(config.active_announcement || "");
+        setAccentColor(config.accent_color || defaultAccentColor);
         setServices(config.services.map(toServiceItem));
+        setLastPersistedConfig({
+          ...config,
+          slogan: config.slogan || "",
+          active_announcement: config.active_announcement || null,
+          accent_color: config.accent_color || defaultAccentColor,
+          services: Array.isArray(config.services) ? config.services : [],
+        });
       } catch {
         if (isMounted) {
           setLoadError("No se pudo cargar la configuración actual");
@@ -179,32 +194,68 @@ export default function SettingsPage() {
     );
   };
 
-  const handleSaveConfiguration = async () => {
-    const payload: BusinessConfig = {
+  const buildCurrentPayload = (): BusinessConfig => ({
       name: businessName,
+      slogan,
       type: uiTypeToAPI(businessType),
       start_hour: timeToHour(startTime),
       end_hour: timeToHour(endTime),
       tone: uiToneToAPI(botTone),
       welcome_message: welcomeMessage,
       active_announcement: activeAnnouncement || null,
+      accent_color: accentColor,
       services: services.map((service) => ({
         name: service.name.trim() || "Servicio",
         duration: service.duration,
         price: service.price,
       })),
-    };
+    });
 
+  const resetSaveStatusLater = () => {
+    window.setTimeout(() => setSaveStatus("idle"), 3000);
+  };
+
+  const handleSaveConfiguration = async () => {
+    const payload = buildCurrentPayload();
     setSaveStatus("saving");
+    setLoadError("");
+
     try {
       await updateConfig("demo", payload);
+      setLastPersistedConfig(payload);
       setSaveStatus("success");
-      setTimeout(() => setSaveStatus("idle"), 3000);
+      resetSaveStatusLater();
     } catch {
-      setSaveStatus("idle");
+      setSaveStatus("error");
       setLoadError("No se pudo guardar la configuración");
+      resetSaveStatusLater();
     }
   };
+
+  const handlePublishAnnouncement = async () => {
+    // Publica solo anuncio sobre la última configuración persistida.
+    const basePayload = lastPersistedConfig ?? buildCurrentPayload();
+    const payload: BusinessConfig = {
+      ...basePayload,
+      active_announcement: activeAnnouncement.trim() ? activeAnnouncement.trim() : null,
+    };
+
+    setSaveStatus("publishing");
+    setLoadError("");
+
+    try {
+      await updateConfig("demo", payload);
+      setLastPersistedConfig(payload);
+      setSaveStatus("success");
+      resetSaveStatusLater();
+    } catch {
+      setSaveStatus("error");
+      setLoadError("No se pudo publicar el anuncio");
+      resetSaveStatusLater();
+    }
+  };
+
+  const hasActiveAnnouncement = activeAnnouncement.trim().length > 0;
 
   return (
     <section className="space-y-6">
@@ -254,6 +305,45 @@ export default function SettingsPage() {
             </select>
           </label>
         </div>
+
+        <section className="space-y-3 rounded-lg border border-white/10 bg-white/5 p-3">
+          <h4 className="font-medium text-white">Identidad del negocio</h4>
+          <label className="space-y-1 text-sm text-slate-300">
+            <span>Slogan</span>
+            <input
+              value={slogan}
+              onChange={(event) => setSlogan(event.target.value)}
+              placeholder="Ej. El mejor corte de tu vida"
+              className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-white outline-none focus:border-ari-accent"
+            />
+          </label>
+          <label className="space-y-1 text-sm text-slate-300">
+            <span>Mensaje de bienvenida</span>
+            <textarea
+              value={welcomeMessage}
+              onChange={(event) => setWelcomeMessage(event.target.value)}
+              rows={4}
+              className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-sm text-white outline-none focus:border-ari-accent"
+            />
+          </label>
+          <fieldset>
+            <legend className="mb-2 text-sm text-slate-300">Color de acento</legend>
+            <div className="flex flex-wrap gap-2">
+              {accentColorOptions.map((color) => (
+                <button
+                  key={color}
+                  type="button"
+                  onClick={() => setAccentColor(color)}
+                  aria-label={`Seleccionar color ${color}`}
+                  className={`h-9 w-9 rounded-full border-2 transition ${
+                    accentColor === color ? "border-white scale-105" : "border-white/20 hover:border-white/50"
+                  }`}
+                  style={{ backgroundColor: color }}
+                />
+              ))}
+            </div>
+          </fieldset>
+        </section>
 
         <div className="grid gap-4 md:grid-cols-2">
           <label className="space-y-1 text-sm text-slate-300">
@@ -359,13 +449,7 @@ export default function SettingsPage() {
       </article>
 
       <article className="space-y-4 rounded-xl border border-white/10 bg-ari-card p-4">
-        <h3 className="text-lg font-semibold text-white">3. Mensaje de bienvenida</h3>
-        <textarea
-          value={welcomeMessage}
-          onChange={(event) => setWelcomeMessage(event.target.value)}
-          rows={4}
-          className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-sm text-white outline-none focus:border-ari-accent"
-        />
+        <h3 className="text-lg font-semibold text-white">3. Vista previa</h3>
         <button
           type="button"
           onClick={() => setShowPreview((currentValue) => !currentValue)}
@@ -376,7 +460,10 @@ export default function SettingsPage() {
         {showPreview ? (
           <div className="max-w-md rounded-2xl border border-white/10 bg-[#0d0f14] p-3">
             <p className="text-xs text-slate-400">WhatsApp preview</p>
-            <div className="mt-2 ml-auto max-w-[85%] rounded-2xl bg-ari-accent/25 px-3 py-2 text-sm text-violet-100">
+            <div
+              className="mt-2 ml-auto max-w-[85%] rounded-2xl px-3 py-2 text-sm text-white"
+              style={{ backgroundColor: `${accentColor}66` }}
+            >
               {welcomeMessage}
             </div>
           </div>
@@ -385,17 +472,29 @@ export default function SettingsPage() {
 
       <article className="space-y-4 rounded-xl border border-white/10 bg-ari-card p-4">
         <h3 className="text-lg font-semibold text-white">4. Anuncios activos</h3>
-        <input
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm text-slate-300">Anuncio actual</p>
+          <span
+            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
+              hasActiveAnnouncement ? "bg-emerald-500/20 text-emerald-200" : "bg-slate-600/30 text-slate-300"
+            }`}
+          >
+            {hasActiveAnnouncement ? "Anuncio activo" : "Sin anuncio"}
+          </span>
+        </div>
+        <textarea
           value={activeAnnouncement}
           onChange={(event) => setActiveAnnouncement(event.target.value)}
+          rows={4}
           className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-sm text-white outline-none focus:border-ari-accent"
         />
         <button
           type="button"
-          onClick={handleSaveConfiguration}
-          className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 hover:bg-white/10"
+          onClick={handlePublishAnnouncement}
+          disabled={saveStatus === "publishing" || saveStatus === "saving" || isLoadingConfig}
+          className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-70"
         >
-          Guardar
+          {saveStatus === "publishing" ? "Publicando anuncio..." : "Publicar anuncio"}
         </button>
       </article>
 
@@ -412,7 +511,9 @@ export default function SettingsPage() {
               Guardando configuración...
             </>
           ) : saveStatus === "success" ? (
-            "✅ Configuración guardada"
+            saveSuccessText
+          ) : saveStatus === "error" ? (
+            "Error al guardar configuración"
           ) : (
             "Guardar configuración"
           )}
