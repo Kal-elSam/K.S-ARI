@@ -41,7 +41,12 @@ const PORT = process.env.PORT || 3000;
 const TIMEZONE = 'America/Mexico_City';
 
 app.use(express.json());
-app.use(cors({ origin: 'http://localhost:3001' }));
+// Dashboard local + despliegue en Vercel (preflight desde el navegador).
+app.use(
+  cors({
+    origin: ['http://localhost:3001', 'https://k-s-ari.vercel.app'],
+  })
+);
 
 // ----------------------------------------------------------------------------
 // BASE DE DATOS (PostgreSQL)
