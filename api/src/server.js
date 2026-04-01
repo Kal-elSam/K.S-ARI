@@ -1,5 +1,20 @@
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
+const Sentry = require('@sentry/node');
+
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    environment:
+      process.env.SENTRY_ENVIRONMENT ||
+      process.env.RAILWAY_ENVIRONMENT ||
+      process.env.NODE_ENV ||
+      'development',
+    tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.05 : 0,
+    integrations: [Sentry.expressIntegration()],
+  });
+}
+
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -1127,6 +1142,10 @@ app.post('/webhook', async (req, res) => {
     res.sendStatus(500);
   }
 });
+
+if (process.env.SENTRY_DSN) {
+  Sentry.setupExpressErrorHandler(app);
+}
 
 // ----------------------------------------------------------------------------
 // HANDLERS DE STATE MACHINE (extraídos para mantener el webhook limpio)
