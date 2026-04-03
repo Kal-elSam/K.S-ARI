@@ -1,5 +1,5 @@
 const { pool } = require('../core/db');
-const { callAI } = require('../groq');
+const { callAI } = require('../infrastructure/groqClient');
 const { getBusinessConfig } = require('../businessConfig');
 const {
   VALID_IMAGE_SOURCES,

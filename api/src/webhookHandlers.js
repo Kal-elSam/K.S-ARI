@@ -5,7 +5,7 @@ const {
   updateConversationContext,
 } = require('./conversation');
 const { buildSystemPrompt } = require('./businessConfig');
-const { callAI } = require('./groq');
+const { callAI } = require('./infrastructure/groqClient');
 const { sendWhatsAppMessage } = require('./whatsapp');
 const {
   getAvailableSlots,

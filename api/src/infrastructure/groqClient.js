@@ -1,3 +1,8 @@
+/**
+ * Cliente HTTP para la API de Groq (chat completions + tools).
+ * Capa de infraestructura: no contiene lógica de negocio.
+ */
+
 async function requestGroq(payload, apiKey) {
   const url = 'https://api.groq.com/openai/v1/chat/completions';
   const response = await fetch(url, {

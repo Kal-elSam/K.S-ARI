@@ -1,6 +1,6 @@
 const { updateConversationState, updateConversationContext } = require('../../../whatsapp/conversation');
 const { buildSystemPrompt } = require('../../../businessConfig');
-const { callAIWithTools } = require('../../../groq');
+const { callAIWithTools } = require('../../../infrastructure/groqClient');
 const { sendWhatsAppMessage } = require('../../../whatsapp/whatsapp');
 const { trimHistory } = require('../../../shared/ai/chatHistory');
 
