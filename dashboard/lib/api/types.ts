@@ -193,6 +193,10 @@ export interface PublishNowPayload {
   topic?: string;
   platforms?: SocialSchedulePlatform[];
   tone?: string;
+  /** Si vienen del preview, se publican sin regenerar con IA. */
+  content?: string;
+  hashtags?: string;
+  imageUrl?: string;
 }
 
 export interface PublishNowResponse {

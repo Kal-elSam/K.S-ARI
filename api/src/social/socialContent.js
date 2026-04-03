@@ -1,8 +1,26 @@
 const { pool } = require('../core/db');
 const { callAI } = require('../groq');
 const { getBusinessConfig } = require('../businessConfig');
-const { VALID_IMAGE_SOURCES, SOCIAL_PLACEHOLDER_IMAGE_URL } = require('./socialConstants');
+const {
+  VALID_IMAGE_SOURCES,
+  SOCIAL_PLACEHOLDER_IMAGE_URL,
+  UNSPLASH_TECH_BUSINESS_COLLECTION_IDS,
+} = require('./socialConstants');
 const { formatHashtags, doesTopicMatch } = require('./socialHelpers');
+
+/**
+ * Consultas fijas más alineadas al tema (evita resultados genéricos tipo banca).
+ */
+function unsplashQueryFromTopicKeywords(safeTopic) {
+  const t = String(safeTopic || '').toLowerCase();
+  if (/software|tecnolog(í|i)a|digital|automatizaci(ó|o)n|whatsapp/.test(t)) {
+    return 'technology business laptop workspace';
+  }
+  if (/servicios|planes|precio/.test(t)) {
+    return 'business meeting professional';
+  }
+  return null;
+}
 
 async function generatePostContent(businessId, topic, tone) {
   try {
@@ -22,6 +40,7 @@ Debes responder SOLO JSON válido con esta forma exacta:
 {"content":"...","hashtags":["#uno","#dos","#tres","#cuatro","#cinco"]}
 Reglas:
 - content máximo 150 palabras
+- el texto debe tener párrafos cortos separados por saltos de línea; máximo 3 párrafos; cada párrafo máximo 2 oraciones
 - incluir emojis adecuados al tono solicitado
 - hashtags exactamente 5, relevantes y en español cuando aplique
 - no agregues texto fuera del JSON`;
@@ -85,23 +104,28 @@ async function getImageForPost(businessId, topic, imageSource) {
     if (safeImageSource === 'unsplash' || safeImageSource === 'auto') {
       const unsplashKey = String(process.env.UNSPLASH_ACCESS_KEY || '').trim();
       if (unsplashKey) {
-        let queryEN = safeTopic || 'negocios mexico';
-        try {
-          const userPrompt = `Translate this topic to a 2-3 word English search query for stock photos. Respond with ONLY the translation, nothing else: ${safeTopic}`;
-          const translated = await callAI(
-            'You only output the translation requested by the user, nothing else.',
-            userPrompt
-          );
-          const cleaned = String(translated || '')
-            .trim()
-            .replace(/^["']|["']$/g, '')
-            .split('\n')[0]
-            .trim();
-          if (cleaned) {
-            queryEN = cleaned;
+        let queryEN = safeTopic || 'modern business teamwork';
+        const keywordQuery = unsplashQueryFromTopicKeywords(safeTopic);
+        if (keywordQuery) {
+          queryEN = keywordQuery;
+        } else {
+          try {
+            const userPrompt = `Translate this topic to a 2-3 word English search query for stock photos. Respond with ONLY the translation, nothing else: ${safeTopic}`;
+            const translated = await callAI(
+              'You only output the translation requested by the user, nothing else.',
+              userPrompt
+            );
+            const cleaned = String(translated || '')
+              .trim()
+              .replace(/^["']|["']$/g, '')
+              .split('\n')[0]
+              .trim();
+            if (cleaned) {
+              queryEN = cleaned;
+            }
+          } catch (translateError) {
+            console.error('[ERROR SOCIAL] Traducción Unsplash omitida:', translateError.message);
           }
-        } catch (translateError) {
-          console.error('[ERROR SOCIAL] Traducción Unsplash omitida:', translateError.message);
         }
 
         console.log(`[UNSPLASH] Buscando imagen para topic: "${safeTopic}" → query en inglés: "${queryEN}"`);
@@ -109,8 +133,12 @@ async function getImageForPost(businessId, topic, imageSource) {
         const url = new URL('https://api.unsplash.com/search/photos');
         url.searchParams.set('query', queryEN);
         url.searchParams.set('orientation', 'landscape');
-        url.searchParams.set('per_page', '1');
-        url.searchParams.set('page', String(Math.floor(Math.random() * 5) + 1));
+        url.searchParams.set('content_filter', 'high');
+        url.searchParams.set('per_page', '10');
+        url.searchParams.set('page', String(Math.floor(Math.random() * 3) + 1));
+        if (UNSPLASH_TECH_BUSINESS_COLLECTION_IDS) {
+          url.searchParams.set('collections', UNSPLASH_TECH_BUSINESS_COLLECTION_IDS);
+        }
 
         const response = await fetch(url.toString(), {
           headers: {
@@ -118,9 +146,16 @@ async function getImageForPost(businessId, topic, imageSource) {
           },
         });
         const data = await response.json();
+        const results = Array.isArray(data.results) ? data.results : [];
 
-        if (response.ok && Array.isArray(data.results) && data.results.length > 0) {
-          const imageUrl = String(data.results[0]?.urls?.regular || '').trim();
+        if (response.ok && results.length > 0) {
+          const randomIndex = Math.floor(Math.random() * Math.min(results.length, 5));
+          const pick = results[randomIndex];
+          const width = typeof pick?.width === 'number' ? pick.width : 1080;
+          if (width < 400) {
+            return SOCIAL_PLACEHOLDER_IMAGE_URL;
+          }
+          const imageUrl = String(pick?.urls?.regular || '').trim();
           if (imageUrl) {
             return imageUrl;
           }

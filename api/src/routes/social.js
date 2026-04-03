@@ -215,7 +215,7 @@ function registerSocialRoutes(app) {
 
   app.post('/api/social/publish/now', async (req, res) => {
     try {
-      const { businessId, topic, platforms, tone } = req.body;
+      const { businessId, topic, platforms, tone, content, hashtags, imageUrl } = req.body;
       const safeBusinessId = String(businessId || 'demo').trim() || 'demo';
       if (platforms !== undefined && !Array.isArray(platforms)) {
         return res.status(400).json({ error: 'platforms debe ser un arreglo JSON.' });
@@ -227,12 +227,23 @@ function registerSocialRoutes(app) {
       const requestedPlatforms = social.normalizePlatformsArray(platforms);
       const safePlatforms = requestedPlatforms.length > 0 ? requestedPlatforms : schedule.platforms;
 
+      const preContent = typeof content === 'string' ? content.trim() : '';
+      const publishOptions =
+        preContent || (typeof imageUrl === 'string' && imageUrl.trim())
+          ? {
+              content: preContent || undefined,
+              hashtags,
+              imageUrl: typeof imageUrl === 'string' ? imageUrl.trim() : '',
+            }
+          : undefined;
+
       const publication = await social.autoGenerateAndPublish(
         safeBusinessId,
         safeTopic,
         safePlatforms,
         safeTone,
-        schedule.image_source
+        schedule.image_source,
+        publishOptions
       );
 
       return res.status(200).json({
@@ -249,18 +260,29 @@ function registerSocialRoutes(app) {
 
   app.post('/api/social/publish', async (req, res) => {
     try {
-      const { content, hashtags, platform, imageUrl, businessId } = req.body;
+      const { content, hashtags, platform, imageUrl, businessId, topic, tone } = req.body;
       const normalizedPlatform = social.validateSocialPlatform(platform);
 
       if (!normalizedPlatform) {
         return res.status(400).json({ error: 'Plataforma inválida. Usa instagram, facebook o both.' });
       }
-      if (!content || typeof content !== 'string') {
-        return res.status(400).json({ error: 'El campo content es obligatorio.' });
+
+      let safeContent = typeof content === 'string' ? content.trim() : '';
+      let safeHashtags = social.formatHashtags(hashtags);
+
+      if (!safeContent) {
+        const safeTopic = typeof topic === 'string' ? topic.trim() : '';
+        if (!safeTopic) {
+          return res.status(400).json({ error: 'Debes enviar content o topic para publicar.' });
+        }
+        const safeBusinessId = String(businessId || 'demo').trim() || 'demo';
+        const safeTone = String(tone || 'Profesional').trim() || 'Profesional';
+        const generated = await social.generatePostContent(safeBusinessId, safeTopic, safeTone);
+        safeContent = generated.content;
+        safeHashtags = generated.hashtags;
       }
 
-      const safeHashtags = social.formatHashtags(hashtags);
-      const publication = await social.publishByPlatform(normalizedPlatform, content, safeHashtags, imageUrl);
+      const publication = await social.publishByPlatform(normalizedPlatform, safeContent, safeHashtags, imageUrl);
 
       await pool.query(
         `INSERT INTO social_posts (
@@ -278,7 +300,7 @@ function registerSocialRoutes(app) {
         [
           String(businessId || 'demo').trim() || 'demo',
           normalizedPlatform,
-          String(content).trim(),
+          safeContent,
           String(imageUrl || '').trim() || null,
           safeHashtags || null,
           publication.ig_post_id,

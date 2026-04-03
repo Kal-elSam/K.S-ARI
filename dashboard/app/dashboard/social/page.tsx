@@ -148,6 +148,7 @@ export default function SocialPage() {
         topic,
         tone,
         platforms: schedule.platforms,
+        ...(content.trim() ? { content, hashtags } : {}),
       });
       await loadPosts();
       setSuccess("Publicación enviada con éxito.");
