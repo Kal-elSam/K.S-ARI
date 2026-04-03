@@ -32,6 +32,7 @@ export function ServicesSection({
         {services.map((service) => {
           const showSetup = service.price_type === "monthly" || service.price_type === "annual";
           const showDurationBlock = service.price_type === "per_session";
+          const hideNumericPrice = service.quotePrice;
 
           return (
             <div
@@ -87,38 +88,53 @@ export function ServicesSection({
                     ))}
                   </select>
                 </label>
-                <div className="grid grid-cols-[1fr_auto] gap-2">
-                  <label className="space-y-1 text-sm text-slate-300">
-                    <span>Precio</span>
+                <div className="space-y-2">
+                  <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
                     <input
-                      type="number"
-                      min={0}
-                      step={1}
-                      value={service.price}
-                      onChange={(event) =>
-                        onUpdateService(service.id, { price: Number(event.target.value) })
-                      }
-                      className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-white outline-none focus:border-ari-accent"
+                      type="checkbox"
+                      checked={service.quotePrice}
+                      onChange={(event) => {
+                        onUpdateService(service.id, { quotePrice: event.target.checked });
+                      }}
+                      className="accent-ari-accent"
                     />
+                    Precio por cotización
                   </label>
-                  <label className="space-y-1 text-sm text-slate-300">
-                    <span>Moneda</span>
-                    <select
-                      value={service.currency}
-                      onChange={(event) =>
-                        onUpdateService(service.id, {
-                          currency: event.target.value as ServiceCurrency,
-                        })
-                      }
-                      className="w-full min-w-[88px] rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-white outline-none focus:border-ari-accent"
-                    >
-                      {CURRENCY_OPTIONS.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <div className="grid grid-cols-[1fr_auto] gap-2">
+                    {hideNumericPrice ? null : (
+                      <label className="space-y-1 text-sm text-slate-300">
+                        <span>Precio</span>
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={service.price}
+                          onChange={(event) =>
+                            onUpdateService(service.id, { price: Number(event.target.value) })
+                          }
+                          className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-white outline-none focus:border-ari-accent"
+                        />
+                      </label>
+                    )}
+                    <label className="space-y-1 text-sm text-slate-300">
+                      <span>Moneda</span>
+                      <select
+                        value={service.currency}
+                        onChange={(event) =>
+                          onUpdateService(service.id, {
+                            currency: event.target.value as ServiceCurrency,
+                          })
+                        }
+                        className="w-full min-w-[88px] rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-white outline-none focus:border-ari-accent"
+                      >
+                        {CURRENCY_OPTIONS.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
                 </div>
               </div>
 

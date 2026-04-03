@@ -55,7 +55,9 @@ export interface BusinessService {
   name: string;
   description: string;
   price_type: ServicePriceType;
-  price: number;
+  price: number | null;
+  /** Presente cuando `price` es null (precio por cotización). */
+  price_label?: string | null;
   setup_fee: number | null;
   currency: ServiceCurrency;
   duration: number | null;

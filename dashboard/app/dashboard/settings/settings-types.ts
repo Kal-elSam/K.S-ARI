@@ -21,7 +21,10 @@ export interface ServiceItem {
   name: string;
   description: string;
   price_type: ServicePriceType;
+  /** Precio numérico; ignorado al guardar si `quotePrice` es true. */
   price: number;
+  /** Si true, se guarda `price: null` y `price_label: "Por cotización"`. */
+  quotePrice: boolean;
   setup_fee: number | null;
   currency: ServiceCurrency;
   duration: number | null;

@@ -9,11 +9,16 @@ function formatServiceForPrompt(service) {
     return 'Servicio';
   }
   const name = service.name || 'Servicio';
-  const price = service.price ?? 'N/A';
+  const price = service.price;
   const currency = service.currency === 'USD' ? 'USD' : 'MXN';
+  const isQuotePrice = price === null || price === undefined;
 
   if (!service.price_type) {
-    return `${name} ($${price} ${currency}, ${service.duration ?? 'N/A'} min)`;
+    if (isQuotePrice) {
+      return `${name} (precio por cotización)`;
+    }
+    const safePrice = price ?? 'N/A';
+    return `${name} ($${safePrice} ${currency}, ${service.duration ?? 'N/A'} min)`;
   }
 
   const priceTypeLabels = {
@@ -28,7 +33,12 @@ function formatServiceForPrompt(service) {
   if (service.description) {
     parts.push(`(${String(service.description)})`);
   }
-  parts.push(`— ${tipoLabel}: $${price} ${currency}`);
+
+  if (isQuotePrice) {
+    parts.push('(precio por cotización)');
+  } else {
+    parts.push(`— ${tipoLabel}: $${price} ${currency}`);
+  }
 
   if ((pt === 'monthly' || pt === 'annual') && service.setup_fee != null && service.setup_fee !== '') {
     const sf = Number(service.setup_fee);

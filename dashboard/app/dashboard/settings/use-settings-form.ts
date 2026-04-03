@@ -125,6 +125,7 @@ export function useSettingsForm() {
         description: "",
         price_type: "one_time",
         price: 0,
+        quotePrice: false,
         setup_fee: null,
         currency: "MXN",
         duration: null,
@@ -144,6 +145,11 @@ export function useSettingsForm() {
           return service;
         }
         const next: ServiceItem = { ...service, ...patch };
+        if (patch.quotePrice === false) {
+          if (typeof next.price !== "number" || Number.isNaN(next.price)) {
+            next.price = 0;
+          }
+        }
         if (patch.price_type !== undefined) {
           if (patch.price_type !== "monthly" && patch.price_type !== "annual") {
             next.setup_fee = null;
