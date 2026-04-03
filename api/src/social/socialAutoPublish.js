@@ -6,19 +6,16 @@ const { buildSocialCaption, normalizePlatformsArray } = require('./socialHelpers
 async function autoGenerateAndPublish(businessId, topic, platforms, tone, imageSource = 'auto') {
   try {
     const safeBusinessId = String(businessId || 'demo').trim() || 'demo';
-    const topicForPost = String(topic ?? '').trim();
+    const safeImageTopic = String(topic || 'business technology').trim();
     const safeTone = String(tone || 'Profesional').trim() || 'Profesional';
     const safePlatforms = normalizePlatformsArray(platforms);
 
-    if (!topicForPost) {
-      throw new Error('El tema del post es obligatorio para autopublicar.');
-    }
     if (safePlatforms.length === 0) {
       throw new Error('Debes indicar al menos una plataforma para autopublicar.');
     }
 
-    const generated = await generatePostContent(safeBusinessId, topicForPost, safeTone);
-    const imageUrl = await getImageForPost(safeBusinessId, topicForPost, imageSource);
+    const generated = await generatePostContent(safeBusinessId, safeImageTopic, safeTone);
+    const imageUrl = await getImageForPost(safeBusinessId, safeImageTopic, imageSource);
     const caption = buildSocialCaption(generated.content, generated.hashtags);
 
     let igPostId = null;

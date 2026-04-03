@@ -85,9 +85,9 @@ async function getImageForPost(businessId, topic, imageSource) {
     if (safeImageSource === 'unsplash' || safeImageSource === 'auto') {
       const unsplashKey = String(process.env.UNSPLASH_ACCESS_KEY || '').trim();
       if (unsplashKey) {
-        let query = safeTopic || 'negocios mexico';
+        let queryEN = safeTopic || 'negocios mexico';
         try {
-          const userPrompt = `Translate this topic to English in 2-3 words for an image search query, respond only with the translation: ${safeTopic}`;
+          const userPrompt = `Translate this topic to a 2-3 word English search query for stock photos. Respond with ONLY the translation, nothing else: ${safeTopic}`;
           const translated = await callAI(
             'You only output the translation requested by the user, nothing else.',
             userPrompt
@@ -98,17 +98,19 @@ async function getImageForPost(businessId, topic, imageSource) {
             .split('\n')[0]
             .trim();
           if (cleaned) {
-            query = cleaned;
+            queryEN = cleaned;
           }
         } catch (translateError) {
           console.error('[ERROR SOCIAL] Traducción Unsplash omitida:', translateError.message);
         }
 
+        console.log(`[UNSPLASH] Buscando imagen para topic: "${safeTopic}" → query en inglés: "${queryEN}"`);
+
         const url = new URL('https://api.unsplash.com/search/photos');
-        url.searchParams.set('query', query);
+        url.searchParams.set('query', queryEN);
         url.searchParams.set('orientation', 'landscape');
         url.searchParams.set('per_page', '1');
-        url.searchParams.set('page', Math.floor(Math.random() * 5) + 1);
+        url.searchParams.set('page', String(Math.floor(Math.random() * 5) + 1));
 
         const response = await fetch(url.toString(), {
           headers: {
