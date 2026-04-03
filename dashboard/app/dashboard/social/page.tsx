@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import {
   createSocialImage,
@@ -122,9 +122,10 @@ export default function SocialPage() {
     void loadImages();
   }, []);
 
-  const loadPreviewImage = async () => {
+  const loadPreviewImage = useCallback(async () => {
     const trimmedTopic = topic.trim();
     if (!trimmedTopic) {
+      setPreviewImageUrl(null);
       return;
     }
     setIsLoadingPreviewImage(true);
@@ -136,7 +137,18 @@ export default function SocialPage() {
     } finally {
       setIsLoadingPreviewImage(false);
     }
-  };
+  }, [topic]);
+
+  /** Vista previa de imagen al abrir «Publicar ahora» o al cambiar tema / fuente de imagen (no solo tras Generar). */
+  useEffect(() => {
+    if (activeTab !== "publicar" || !topic.trim()) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      void loadPreviewImage();
+    }, 400);
+    return () => window.clearTimeout(timeoutId);
+  }, [activeTab, topic, schedule.image_source, loadPreviewImage]);
 
   const handleGenerate = async () => {
     try {
@@ -345,36 +357,43 @@ export default function SocialPage() {
               {isPublishing ? "Publicando..." : "Publicar ahora con 1 click"}
             </button>
           </div>
-          <div className="rounded-2xl border border-white/10 bg-[#0d0f14] p-4">
-            <p className="text-xs uppercase tracking-wider text-slate-400">Preview</p>
-            <div className="mt-3 whitespace-pre-wrap rounded-xl border border-white/10 bg-black/20 p-3 text-sm text-slate-100">{preview || "Aquí verás el preview del post generado."}</div>
-          </div>
-          <div className="rounded-2xl border border-white/10 bg-[#0d0f14] p-4">
-            <p className="text-xs uppercase tracking-wider text-slate-400">Vista previa de imagen</p>
-            {isLoadingPreviewImage ? (
-              <div className="mt-3 flex aspect-square max-w-sm items-center justify-center rounded-xl border border-white/10 bg-black/20">
-                <span className="h-8 w-8 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-2xl border border-white/10 bg-[#0d0f14] p-4">
+              <p className="text-xs uppercase tracking-wider text-slate-400">Preview</p>
+              <div className="mt-3 min-h-[120px] whitespace-pre-wrap rounded-xl border border-white/10 bg-black/20 p-3 text-sm text-slate-100">
+                {preview || "Aquí verás el texto del post generado (o escribe tema y espera la vista previa de imagen al lado)."}
               </div>
-            ) : previewImageUrl ? (
-              <div className="mt-3 space-y-3">
-                <div className="mx-auto aspect-square max-h-80 w-full max-w-sm overflow-hidden rounded-xl border border-white/10 bg-black/40">
-                  {/* eslint-disable-next-line @next/next/no-img-element -- URL Unsplash dinámica, object-fit cuadrado */}
-                  <img src={previewImageUrl} alt="" className="h-full w-full object-cover" />
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-[#0d0f14] p-4">
+              <p className="text-xs uppercase tracking-wider text-slate-400">Vista previa de imagen</p>
+              <p className="mt-1 text-xs text-slate-500">Se actualiza con el tema del post (misma imagen que se usará al publicar si no eliges otra).</p>
+              {isLoadingPreviewImage ? (
+                <div className="mt-3 flex aspect-square max-w-sm items-center justify-center rounded-xl border border-white/10 bg-black/20">
+                  <span className="h-8 w-8 animate-spin rounded-full border-2 border-white/30 border-t-white" />
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void loadPreviewImage();
-                  }}
-                  disabled={isLoadingPreviewImage || !topic.trim()}
-                  className="rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-slate-200 hover:bg-white/10 disabled:opacity-50"
-                >
-                  🔄 Cambiar imagen
-                </button>
-              </div>
-            ) : (
-              <p className="mt-3 text-sm text-slate-500">Genera con IA para ver una imagen acorde al tema.</p>
-            )}
+              ) : previewImageUrl ? (
+                <div className="mt-3 space-y-3">
+                  <div className="mx-auto aspect-square w-full max-w-sm overflow-hidden rounded-xl border border-white/10 bg-black/40">
+                    {/* eslint-disable-next-line @next/next/no-img-element -- URL Unsplash dinámica, object-fit cuadrado */}
+                    <img src={previewImageUrl} alt="" className="h-full w-full object-cover" />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void loadPreviewImage();
+                    }}
+                    disabled={isLoadingPreviewImage || !topic.trim()}
+                    className="rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-slate-200 hover:bg-white/10 disabled:opacity-50"
+                  >
+                    🔄 Cambiar imagen
+                  </button>
+                </div>
+              ) : (
+                <p className="mt-3 text-sm text-slate-500">
+                  Escribe un tema arriba: cargamos una imagen de ejemplo automáticamente, o usa «Generar con IA».
+                </p>
+              )}
+            </div>
           </div>
         </article>
       ) : null}
