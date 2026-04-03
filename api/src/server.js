@@ -1021,11 +1021,31 @@ async function getImageForPost(businessId, topic, imageSource) {
     if (safeImageSource === 'unsplash' || safeImageSource === 'auto') {
       const unsplashKey = String(process.env.UNSPLASH_ACCESS_KEY || '').trim();
       if (unsplashKey) {
-        const query = safeTopic || 'negocios mexico';
+        // Unsplash rinde mejor con queries en inglés; traducimos el tema con la misma IA.
+        let query = safeTopic || 'negocios mexico';
+        try {
+          const userPrompt = `Translate this topic to English in 2-3 words for an image search query, respond only with the translation: ${safeTopic}`;
+          const translated = await callAI(
+            'You only output the translation requested by the user, nothing else.',
+            userPrompt
+          );
+          const cleaned = String(translated || '')
+            .trim()
+            .replace(/^["']|["']$/g, '')
+            .split('\n')[0]
+            .trim();
+          if (cleaned) {
+            query = cleaned;
+          }
+        } catch (translateError) {
+          console.error('[ERROR SOCIAL] Traducción Unsplash omitida:', translateError.message);
+        }
+
         const url = new URL('https://api.unsplash.com/search/photos');
         url.searchParams.set('query', query);
         url.searchParams.set('orientation', 'landscape');
         url.searchParams.set('per_page', '1');
+        url.searchParams.set('page', Math.floor(Math.random() * 5) + 1);
 
         const response = await fetch(url.toString(), {
           headers: {
@@ -1053,19 +1073,19 @@ async function getImageForPost(businessId, topic, imageSource) {
 async function autoGenerateAndPublish(businessId, topic, platforms, tone, imageSource = 'auto') {
   try {
     const safeBusinessId = String(businessId || 'demo').trim() || 'demo';
-    const safeTopic = String(topic || '').trim();
+    const topicForPost = String(topic ?? '').trim();
     const safeTone = String(tone || 'Profesional').trim() || 'Profesional';
     const safePlatforms = normalizePlatformsArray(platforms);
 
-    if (!safeTopic) {
+    if (!topicForPost) {
       throw new Error('El tema del post es obligatorio para autopublicar.');
     }
     if (safePlatforms.length === 0) {
       throw new Error('Debes indicar al menos una plataforma para autopublicar.');
     }
 
-    const generated = await generatePostContent(safeBusinessId, safeTopic, safeTone);
-    const imageUrl = await getImageForPost(safeBusinessId, safeTopic, imageSource);
+    const generated = await generatePostContent(safeBusinessId, topicForPost, safeTone);
+    const imageUrl = await getImageForPost(safeBusinessId, topicForPost, imageSource);
     const caption = buildSocialCaption(generated.content, generated.hashtags);
 
     let igPostId = null;

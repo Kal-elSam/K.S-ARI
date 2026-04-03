@@ -3,7 +3,17 @@
 import { useEffect, useState } from "react";
 import { getConfig, updateConfig, type BusinessConfig, type BusinessService } from "@/lib/api";
 
-type BusinessType = "Consultorio" | "Barbería" | "Inmobiliaria" | "Taller";
+type BusinessType =
+  | "Consultorio"
+  | "Barbería"
+  | "Inmobiliaria"
+  | "Taller"
+  | "Software Company"
+  | "Agencia de marketing"
+  | "Restaurante"
+  | "Gimnasio"
+  | "Spa / Estética"
+  | "Otro";
 type BotTone = "Formal" | "Amigable" | "Muy casual";
 type SaveStatus = "idle" | "saving" | "publishing" | "success" | "error";
 
@@ -14,29 +24,58 @@ interface ServiceItem {
   price: number;
 }
 
-const businessTypeOptions: BusinessType[] = ["Consultorio", "Barbería", "Inmobiliaria", "Taller"];
+const businessTypeOptions: BusinessType[] = [
+  "Consultorio",
+  "Barbería",
+  "Inmobiliaria",
+  "Taller",
+  "Software Company",
+  "Agencia de marketing",
+  "Restaurante",
+  "Gimnasio",
+  "Spa / Estética",
+  "Otro",
+];
 const botToneOptions: BotTone[] = ["Formal", "Amigable", "Muy casual"];
 const accentColorOptions = ["#7c3aed", "#2563eb", "#0f766e", "#dc2626", "#d97706", "#475569"] as const;
 const saveSuccessText = "✅ Configuración guardada — ARI ya usa esta información";
 const defaultAccentColor = accentColorOptions[0];
 
-function apiTypeToUI(value: string): BusinessType {
-  switch (value) {
+function apiTypeToUI(value: string): { select: BusinessType; custom: string } {
+  const normalized = String(value || "").trim().toLowerCase();
+  switch (normalized) {
     case "consultorio":
-      return "Consultorio";
+      return { select: "Consultorio", custom: "" };
     case "barbería":
     case "barberia":
-      return "Barbería";
+      return { select: "Barbería", custom: "" };
     case "inmobiliaria":
-      return "Inmobiliaria";
+      return { select: "Inmobiliaria", custom: "" };
     case "taller":
-      return "Taller";
+      return { select: "Taller", custom: "" };
+    case "software_company":
+    case "software company":
+      return { select: "Software Company", custom: "" };
+    case "agencia_marketing":
+    case "agencia de marketing":
+      return { select: "Agencia de marketing", custom: "" };
+    case "restaurante":
+      return { select: "Restaurante", custom: "" };
+    case "gimnasio":
+      return { select: "Gimnasio", custom: "" };
+    case "spa_estetica":
+    case "spa / estética":
+    case "spa estetica":
+      return { select: "Spa / Estética", custom: "" };
     default:
-      return "Consultorio";
+      if (!normalized) {
+        return { select: "Consultorio", custom: "" };
+      }
+      return { select: "Otro", custom: String(value).trim() };
   }
 }
 
-function uiTypeToAPI(value: BusinessType): string {
+function uiTypeToAPI(value: BusinessType, customType: string): string {
   switch (value) {
     case "Consultorio":
       return "consultorio";
@@ -46,8 +85,22 @@ function uiTypeToAPI(value: BusinessType): string {
       return "inmobiliaria";
     case "Taller":
       return "taller";
-    default:
-      return "consultorio";
+    case "Software Company":
+      return "software_company";
+    case "Agencia de marketing":
+      return "agencia_marketing";
+    case "Restaurante":
+      return "restaurante";
+    case "Gimnasio":
+      return "gimnasio";
+    case "Spa / Estética":
+      return "spa_estetica";
+    case "Otro":
+      return customType.trim() || "otro";
+    default: {
+      const exhaustiveCheck: never = value;
+      return exhaustiveCheck;
+    }
   }
 }
 
@@ -99,6 +152,7 @@ export default function SettingsPage() {
   const [businessName, setBusinessName] = useState<string>("Clínica ARI Demo");
   const [slogan, setSlogan] = useState<string>("");
   const [businessType, setBusinessType] = useState<BusinessType>("Consultorio");
+  const [customBusinessType, setCustomBusinessType] = useState<string>("");
   const [startTime, setStartTime] = useState<string>("09:00");
   const [endTime, setEndTime] = useState<string>("19:00");
   const [botTone, setBotTone] = useState<BotTone>("Amigable");
@@ -134,7 +188,9 @@ export default function SettingsPage() {
 
         setBusinessName(config.name);
         setSlogan(config.slogan || "");
-        setBusinessType(apiTypeToUI(config.type));
+        const typeFromApi = apiTypeToUI(config.type);
+        setBusinessType(typeFromApi.select);
+        setCustomBusinessType(typeFromApi.custom);
         setStartTime(hourToTime(config.start_hour));
         setEndTime(hourToTime(config.end_hour));
         setBotTone(apiToneToUI(config.tone));
@@ -197,7 +253,7 @@ export default function SettingsPage() {
   const buildCurrentPayload = (): BusinessConfig => ({
       name: businessName,
       slogan,
-      type: uiTypeToAPI(businessType),
+      type: uiTypeToAPI(businessType, customBusinessType),
       start_hour: timeToHour(startTime),
       end_hour: timeToHour(endTime),
       tone: uiToneToAPI(botTone),
@@ -290,20 +346,39 @@ export default function SettingsPage() {
             />
           </label>
 
-          <label className="space-y-1 text-sm text-slate-300">
-            <span>Tipo de negocio</span>
-            <select
-              value={businessType}
-              onChange={(event) => setBusinessType(event.target.value as BusinessType)}
-              className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-white outline-none focus:border-ari-accent"
-            >
-              {businessTypeOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="space-y-2">
+            <label className="space-y-1 text-sm text-slate-300">
+              <span>Tipo de negocio</span>
+              <select
+                value={businessType}
+                onChange={(event) => {
+                  const next = event.target.value as BusinessType;
+                  setBusinessType(next);
+                  if (next !== "Otro") {
+                    setCustomBusinessType("");
+                  }
+                }}
+                className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-white outline-none focus:border-ari-accent"
+              >
+                {businessTypeOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {businessType === "Otro" ? (
+              <label className="space-y-1 text-sm text-slate-300">
+                <span>Especifica tu tipo de negocio</span>
+                <input
+                  value={customBusinessType}
+                  onChange={(event) => setCustomBusinessType(event.target.value)}
+                  placeholder="Ej. Floristería, Coworking..."
+                  className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-white outline-none focus:border-ari-accent"
+                />
+              </label>
+            ) : null}
+          </div>
         </div>
 
         <section className="space-y-3 rounded-lg border border-white/10 bg-white/5 p-3">
