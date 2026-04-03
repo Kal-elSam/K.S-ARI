@@ -48,10 +48,17 @@ export interface Appointment {
   service: string | null;
 }
 
+export type ServicePriceType = "one_time" | "monthly" | "annual" | "per_session";
+export type ServiceCurrency = "MXN" | "USD";
+
 export interface BusinessService {
   name: string;
-  duration: number;
+  description: string;
+  price_type: ServicePriceType;
   price: number;
+  setup_fee: number | null;
+  currency: ServiceCurrency;
+  duration: number | null;
 }
 
 export interface BusinessConfig {

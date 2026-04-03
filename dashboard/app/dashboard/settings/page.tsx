@@ -1,317 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { getConfig, updateConfig, type BusinessConfig, type BusinessService } from "@/lib/api";
-
-type BusinessType =
-  | "Consultorio"
-  | "Barbería"
-  | "Inmobiliaria"
-  | "Taller"
-  | "Software Company"
-  | "Agencia de marketing"
-  | "Restaurante"
-  | "Gimnasio"
-  | "Spa / Estética"
-  | "Otro";
-type BotTone = "Formal" | "Amigable" | "Muy casual";
-type SaveStatus = "idle" | "saving" | "publishing" | "success" | "error";
-
-interface ServiceItem {
-  id: string;
-  name: string;
-  duration: number;
-  price: number;
-}
-
-const businessTypeOptions: BusinessType[] = [
-  "Consultorio",
-  "Barbería",
-  "Inmobiliaria",
-  "Taller",
-  "Software Company",
-  "Agencia de marketing",
-  "Restaurante",
-  "Gimnasio",
-  "Spa / Estética",
-  "Otro",
-];
-const botToneOptions: BotTone[] = ["Formal", "Amigable", "Muy casual"];
-const accentColorOptions = ["#7c3aed", "#2563eb", "#0f766e", "#dc2626", "#d97706", "#475569"] as const;
-const saveSuccessText = "✅ Configuración guardada — ARI ya usa esta información";
-const defaultAccentColor = accentColorOptions[0];
-
-function apiTypeToUI(value: string): { select: BusinessType; custom: string } {
-  const normalized = String(value || "").trim().toLowerCase();
-  switch (normalized) {
-    case "consultorio":
-      return { select: "Consultorio", custom: "" };
-    case "barbería":
-    case "barberia":
-      return { select: "Barbería", custom: "" };
-    case "inmobiliaria":
-      return { select: "Inmobiliaria", custom: "" };
-    case "taller":
-      return { select: "Taller", custom: "" };
-    case "software_company":
-    case "software company":
-      return { select: "Software Company", custom: "" };
-    case "agencia_marketing":
-    case "agencia de marketing":
-      return { select: "Agencia de marketing", custom: "" };
-    case "restaurante":
-      return { select: "Restaurante", custom: "" };
-    case "gimnasio":
-      return { select: "Gimnasio", custom: "" };
-    case "spa_estetica":
-    case "spa / estética":
-    case "spa estetica":
-      return { select: "Spa / Estética", custom: "" };
-    default:
-      if (!normalized) {
-        return { select: "Consultorio", custom: "" };
-      }
-      return { select: "Otro", custom: String(value).trim() };
-  }
-}
-
-function uiTypeToAPI(value: BusinessType, customType: string): string {
-  switch (value) {
-    case "Consultorio":
-      return "consultorio";
-    case "Barbería":
-      return "barbería";
-    case "Inmobiliaria":
-      return "inmobiliaria";
-    case "Taller":
-      return "taller";
-    case "Software Company":
-      return "software_company";
-    case "Agencia de marketing":
-      return "agencia_marketing";
-    case "Restaurante":
-      return "restaurante";
-    case "Gimnasio":
-      return "gimnasio";
-    case "Spa / Estética":
-      return "spa_estetica";
-    case "Otro":
-      return customType.trim() || "otro";
-    default: {
-      const exhaustiveCheck: never = value;
-      return exhaustiveCheck;
-    }
-  }
-}
-
-function apiToneToUI(value: string): BotTone {
-  switch (value) {
-    case "formal":
-      return "Formal";
-    case "muy_casual":
-      return "Muy casual";
-    case "amigable":
-    default:
-      return "Amigable";
-  }
-}
-
-function uiToneToAPI(value: BotTone): string {
-  switch (value) {
-    case "Formal":
-      return "formal";
-    case "Muy casual":
-      return "muy_casual";
-    case "Amigable":
-    default:
-      return "amigable";
-  }
-}
-
-function hourToTime(value: number): string {
-  const safeHour = Math.max(0, Math.min(23, value));
-  return `${String(safeHour).padStart(2, "0")}:00`;
-}
-
-function timeToHour(value: string): number {
-  const [hourPart] = value.split(":");
-  const parsed = Number(hourPart);
-  return Number.isNaN(parsed) ? 9 : parsed;
-}
-
-function toServiceItem(service: BusinessService, index: number): ServiceItem {
-  return {
-    id: `s-${Date.now()}-${index}`,
-    name: service.name,
-    duration: service.duration,
-    price: service.price,
-  };
-}
+import { AnnouncementsSection } from "./components/announcements-section";
+import { BusinessInfoSection } from "./components/business-info-section";
+import { ServicesSection } from "./components/services-section";
+import { SettingsPreviewSection } from "./components/settings-preview-section";
+import { saveSuccessText } from "./settings-constants";
+import { useSettingsForm } from "./use-settings-form";
 
 export default function SettingsPage() {
-  const [businessName, setBusinessName] = useState<string>("Clínica ARI Demo");
-  const [slogan, setSlogan] = useState<string>("");
-  const [businessType, setBusinessType] = useState<BusinessType>("Consultorio");
-  const [customBusinessType, setCustomBusinessType] = useState<string>("");
-  const [startTime, setStartTime] = useState<string>("09:00");
-  const [endTime, setEndTime] = useState<string>("19:00");
-  const [botTone, setBotTone] = useState<BotTone>("Amigable");
-  const [services, setServices] = useState<ServiceItem[]>([
-    { id: "s-1", name: "Limpieza dental", duration: 45, price: 650 },
-    { id: "s-2", name: "Valoración general", duration: 30, price: 400 }
-  ]);
-  const [welcomeMessage, setWelcomeMessage] = useState<string>(
-    "Hola, soy ARI. Te ayudo a agendar tu cita en minutos. ¿Qué servicio te interesa?"
-  );
-  const [showPreview, setShowPreview] = useState<boolean>(false);
-  const [activeAnnouncement, setActiveAnnouncement] = useState<string>(
-    "Hoy hay 10% de descuento en limpiezas"
-  );
-  const [accentColor, setAccentColor] = useState<string>(defaultAccentColor);
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
-  const [isLoadingConfig, setIsLoadingConfig] = useState<boolean>(true);
-  const [loadError, setLoadError] = useState<string>("");
-  const [lastPersistedConfig, setLastPersistedConfig] = useState<BusinessConfig | null>(null);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadConfig = async () => {
-      setIsLoadingConfig(true);
-      setLoadError("");
-
-      try {
-        const config = await getConfig("demo");
-        if (!isMounted) {
-          return;
-        }
-
-        setBusinessName(config.name);
-        setSlogan(config.slogan || "");
-        const typeFromApi = apiTypeToUI(config.type);
-        setBusinessType(typeFromApi.select);
-        setCustomBusinessType(typeFromApi.custom);
-        setStartTime(hourToTime(config.start_hour));
-        setEndTime(hourToTime(config.end_hour));
-        setBotTone(apiToneToUI(config.tone));
-        setWelcomeMessage(config.welcome_message);
-        setActiveAnnouncement(config.active_announcement || "");
-        setAccentColor(config.accent_color || defaultAccentColor);
-        setServices(config.services.map(toServiceItem));
-        setLastPersistedConfig({
-          ...config,
-          slogan: config.slogan || "",
-          active_announcement: config.active_announcement || null,
-          accent_color: config.accent_color || defaultAccentColor,
-          services: Array.isArray(config.services) ? config.services : [],
-        });
-      } catch {
-        if (isMounted) {
-          setLoadError("No se pudo cargar la configuración actual");
-        }
-      } finally {
-        if (isMounted) {
-          setIsLoadingConfig(false);
-        }
-      }
-    };
-
-    loadConfig();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  const handleAddService = () => {
-    setServices((currentServices) => [
-      ...currentServices,
-      { id: `s-${Date.now()}`, name: "", duration: 30, price: 0 }
-    ]);
-  };
-
-  const handleRemoveService = (serviceId: string) => {
-    setServices((currentServices) => currentServices.filter((service) => service.id !== serviceId));
-  };
-
-  const handleServiceChange = <K extends keyof ServiceItem>(
-    serviceId: string,
-    field: K,
-    value: ServiceItem[K]
-  ) => {
-    setServices((currentServices) =>
-      currentServices.map((service) =>
-        service.id === serviceId
-          ? {
-              ...service,
-              [field]: value
-            }
-          : service
-      )
-    );
-  };
-
-  const buildCurrentPayload = (): BusinessConfig => ({
-      name: businessName,
-      slogan,
-      type: uiTypeToAPI(businessType, customBusinessType),
-      start_hour: timeToHour(startTime),
-      end_hour: timeToHour(endTime),
-      tone: uiToneToAPI(botTone),
-      welcome_message: welcomeMessage,
-      active_announcement: activeAnnouncement || null,
-      accent_color: accentColor,
-      services: services.map((service) => ({
-        name: service.name.trim() || "Servicio",
-        duration: service.duration,
-        price: service.price,
-      })),
-    });
-
-  const resetSaveStatusLater = () => {
-    window.setTimeout(() => setSaveStatus("idle"), 3000);
-  };
-
-  const handleSaveConfiguration = async () => {
-    const payload = buildCurrentPayload();
-    setSaveStatus("saving");
-    setLoadError("");
-
-    try {
-      await updateConfig("demo", payload);
-      setLastPersistedConfig(payload);
-      setSaveStatus("success");
-      resetSaveStatusLater();
-    } catch {
-      setSaveStatus("error");
-      setLoadError("No se pudo guardar la configuración");
-      resetSaveStatusLater();
-    }
-  };
-
-  const handlePublishAnnouncement = async () => {
-    // Publica solo anuncio sobre la última configuración persistida.
-    const basePayload = lastPersistedConfig ?? buildCurrentPayload();
-    const payload: BusinessConfig = {
-      ...basePayload,
-      active_announcement: activeAnnouncement.trim() ? activeAnnouncement.trim() : null,
-    };
-
-    setSaveStatus("publishing");
-    setLoadError("");
-
-    try {
-      await updateConfig("demo", payload);
-      setLastPersistedConfig(payload);
-      setSaveStatus("success");
-      resetSaveStatusLater();
-    } catch {
-      setSaveStatus("error");
-      setLoadError("No se pudo publicar el anuncio");
-      resetSaveStatusLater();
-    }
-  };
-
-  const hasActiveAnnouncement = activeAnnouncement.trim().length > 0;
+  const form = useSettingsForm();
 
   return (
     <section className="space-y-6">
@@ -320,13 +17,13 @@ export default function SettingsPage() {
         <p className="mt-1 text-sm text-slate-400">Parámetros base del bot ARI.</p>
       </header>
 
-      {loadError ? (
+      {form.loadError ? (
         <p className="rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-          {loadError}
+          {form.loadError}
         </p>
       ) : null}
 
-      {isLoadingConfig ? (
+      {form.isLoadingConfig ? (
         <article className="space-y-3 rounded-xl border border-white/10 bg-ari-card p-4">
           <div className="h-6 w-52 animate-pulse rounded bg-white/10" />
           <div className="h-10 w-full animate-pulse rounded bg-white/10" />
@@ -334,260 +31,69 @@ export default function SettingsPage() {
         </article>
       ) : null}
 
-      <article className="space-y-4 rounded-xl border border-white/10 bg-ari-card p-4">
-        <h3 className="text-lg font-semibold text-white">1. Información del negocio</h3>
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="space-y-1 text-sm text-slate-300">
-            <span>Nombre del negocio</span>
-            <input
-              value={businessName}
-              onChange={(event) => setBusinessName(event.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-white outline-none focus:border-ari-accent"
-            />
-          </label>
+      <BusinessInfoSection
+        businessName={form.businessName}
+        onBusinessNameChange={form.setBusinessName}
+        businessType={form.businessType}
+        onBusinessTypeChange={form.setBusinessType}
+        customBusinessType={form.customBusinessType}
+        onCustomBusinessTypeChange={form.setCustomBusinessType}
+        slogan={form.slogan}
+        onSloganChange={form.setSlogan}
+        welcomeMessage={form.welcomeMessage}
+        onWelcomeMessageChange={form.setWelcomeMessage}
+        accentColor={form.accentColor}
+        onAccentColorChange={form.setAccentColor}
+        startTime={form.startTime}
+        onStartTimeChange={form.setStartTime}
+        endTime={form.endTime}
+        onEndTimeChange={form.setEndTime}
+        botTone={form.botTone}
+        onBotToneChange={form.setBotTone}
+      />
 
-          <div className="space-y-2">
-            <label className="space-y-1 text-sm text-slate-300">
-              <span>Tipo de negocio</span>
-              <select
-                value={businessType}
-                onChange={(event) => {
-                  const next = event.target.value as BusinessType;
-                  setBusinessType(next);
-                  if (next !== "Otro") {
-                    setCustomBusinessType("");
-                  }
-                }}
-                className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-white outline-none focus:border-ari-accent"
-              >
-                {businessTypeOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {businessType === "Otro" ? (
-              <label className="space-y-1 text-sm text-slate-300">
-                <span>Especifica tu tipo de negocio</span>
-                <input
-                  value={customBusinessType}
-                  onChange={(event) => setCustomBusinessType(event.target.value)}
-                  placeholder="Ej. Floristería, Coworking..."
-                  className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-white outline-none focus:border-ari-accent"
-                />
-              </label>
-            ) : null}
-          </div>
-        </div>
+      <ServicesSection
+        services={form.services}
+        onAddService={form.handleAddService}
+        onRemoveService={form.handleRemoveService}
+        onUpdateService={form.updateService}
+      />
 
-        <section className="space-y-3 rounded-lg border border-white/10 bg-white/5 p-3">
-          <h4 className="font-medium text-white">Identidad del negocio</h4>
-          <label className="space-y-1 text-sm text-slate-300">
-            <span>Slogan</span>
-            <input
-              value={slogan}
-              onChange={(event) => setSlogan(event.target.value)}
-              placeholder="Ej. El mejor corte de tu vida"
-              className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-white outline-none focus:border-ari-accent"
-            />
-          </label>
-          <label className="space-y-1 text-sm text-slate-300">
-            <span>Mensaje de bienvenida</span>
-            <textarea
-              value={welcomeMessage}
-              onChange={(event) => setWelcomeMessage(event.target.value)}
-              rows={4}
-              className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-sm text-white outline-none focus:border-ari-accent"
-            />
-          </label>
-          <fieldset>
-            <legend className="mb-2 text-sm text-slate-300">Color de acento</legend>
-            <div className="flex flex-wrap gap-2">
-              {accentColorOptions.map((color) => (
-                <button
-                  key={color}
-                  type="button"
-                  onClick={() => setAccentColor(color)}
-                  aria-label={`Seleccionar color ${color}`}
-                  className={`h-9 w-9 rounded-full border-2 transition ${
-                    accentColor === color ? "border-white scale-105" : "border-white/20 hover:border-white/50"
-                  }`}
-                  style={{ backgroundColor: color }}
-                />
-              ))}
-            </div>
-          </fieldset>
-        </section>
+      <SettingsPreviewSection
+        showPreview={form.showPreview}
+        onTogglePreview={() => form.setShowPreview((currentValue) => !currentValue)}
+        welcomeMessage={form.welcomeMessage}
+        accentColor={form.accentColor}
+      />
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="space-y-1 text-sm text-slate-300">
-            <span>Hora inicio</span>
-            <input
-              type="time"
-              value={startTime}
-              onChange={(event) => setStartTime(event.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-white outline-none focus:border-ari-accent"
-            />
-          </label>
-          <label className="space-y-1 text-sm text-slate-300">
-            <span>Hora fin</span>
-            <input
-              type="time"
-              value={endTime}
-              onChange={(event) => setEndTime(event.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-white outline-none focus:border-ari-accent"
-            />
-          </label>
-        </div>
-
-        <fieldset>
-          <legend className="mb-2 text-sm text-slate-300">Tono del bot</legend>
-          <div className="flex flex-wrap gap-3">
-            {botToneOptions.map((toneOption) => (
-              <label
-                key={toneOption}
-                className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-sm text-slate-200"
-              >
-                <input
-                  type="radio"
-                  name="botTone"
-                  value={toneOption}
-                  checked={botTone === toneOption}
-                  onChange={() => setBotTone(toneOption)}
-                  className="accent-ari-accent"
-                />
-                {toneOption}
-              </label>
-            ))}
-          </div>
-        </fieldset>
-      </article>
-
-      <article className="space-y-4 rounded-xl border border-white/10 bg-ari-card p-4">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-lg font-semibold text-white">2. Servicios</h3>
-          <button
-            type="button"
-            onClick={handleAddService}
-            className="rounded-lg bg-ari-accent px-3 py-2 text-sm font-medium text-white hover:brightness-110"
-          >
-            Agregar servicio
-          </button>
-        </div>
-
-        <div className="space-y-3">
-          {services.map((service) => (
-            <div key={service.id} className="grid gap-3 rounded-lg border border-white/10 bg-white/5 p-3 md:grid-cols-4">
-              <label className="space-y-1 text-sm text-slate-300 md:col-span-2">
-                <span>Nombre</span>
-                <input
-                  value={service.name}
-                  onChange={(event) => handleServiceChange(service.id, "name", event.target.value)}
-                  className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-white outline-none focus:border-ari-accent"
-                />
-              </label>
-              <label className="space-y-1 text-sm text-slate-300">
-                <span>Duración (min)</span>
-                <input
-                  type="number"
-                  min={5}
-                  step={5}
-                  value={service.duration}
-                  onChange={(event) => handleServiceChange(service.id, "duration", Number(event.target.value))}
-                  className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-white outline-none focus:border-ari-accent"
-                />
-              </label>
-              <div className="grid grid-cols-[1fr_auto] items-end gap-2">
-                <label className="space-y-1 text-sm text-slate-300">
-                  <span>Precio MXN</span>
-                  <input
-                    type="number"
-                    min={0}
-                    step={50}
-                    value={service.price}
-                    onChange={(event) => handleServiceChange(service.id, "price", Number(event.target.value))}
-                    className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-white outline-none focus:border-ari-accent"
-                  />
-                </label>
-                <button
-                  type="button"
-                  onClick={() => handleRemoveService(service.id)}
-                  className="rounded-lg bg-red-500/20 px-3 py-2 text-sm font-medium text-red-200 hover:bg-red-500/30"
-                >
-                  Eliminar
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </article>
-
-      <article className="space-y-4 rounded-xl border border-white/10 bg-ari-card p-4">
-        <h3 className="text-lg font-semibold text-white">3. Vista previa</h3>
-        <button
-          type="button"
-          onClick={() => setShowPreview((currentValue) => !currentValue)}
-          className="rounded-lg border border-ari-accent bg-ari-accent/20 px-3 py-2 text-sm font-medium text-violet-200 hover:bg-ari-accent/30"
-        >
-          Vista previa
-        </button>
-        {showPreview ? (
-          <div className="max-w-md rounded-2xl border border-white/10 bg-[#0d0f14] p-3">
-            <p className="text-xs text-slate-400">WhatsApp preview</p>
-            <div
-              className="mt-2 ml-auto max-w-[85%] rounded-2xl px-3 py-2 text-sm text-white"
-              style={{ backgroundColor: `${accentColor}66` }}
-            >
-              {welcomeMessage}
-            </div>
-          </div>
-        ) : null}
-      </article>
-
-      <article className="space-y-4 rounded-xl border border-white/10 bg-ari-card p-4">
-        <h3 className="text-lg font-semibold text-white">4. Anuncios activos</h3>
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-sm text-slate-300">Anuncio actual</p>
-          <span
-            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
-              hasActiveAnnouncement ? "bg-emerald-500/20 text-emerald-200" : "bg-slate-600/30 text-slate-300"
-            }`}
-          >
-            {hasActiveAnnouncement ? "Anuncio activo" : "Sin anuncio"}
-          </span>
-        </div>
-        <textarea
-          value={activeAnnouncement}
-          onChange={(event) => setActiveAnnouncement(event.target.value)}
-          rows={4}
-          className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-sm text-white outline-none focus:border-ari-accent"
-        />
-        <button
-          type="button"
-          onClick={handlePublishAnnouncement}
-          disabled={saveStatus === "publishing" || saveStatus === "saving" || isLoadingConfig}
-          className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-70"
-        >
-          {saveStatus === "publishing" ? "Publicando anuncio..." : "Publicar anuncio"}
-        </button>
-      </article>
+      <AnnouncementsSection
+        activeAnnouncement={form.activeAnnouncement}
+        onActiveAnnouncementChange={form.setActiveAnnouncement}
+        hasActiveAnnouncement={form.hasActiveAnnouncement}
+        onPublishAnnouncement={() => {
+          void form.handlePublishAnnouncement();
+        }}
+        saveStatus={form.saveStatus}
+        isLoadingConfig={form.isLoadingConfig}
+      />
 
       <footer className="pb-2">
         <button
           type="button"
-          onClick={handleSaveConfiguration}
-          disabled={saveStatus === "saving" || isLoadingConfig}
+          onClick={() => {
+            void form.handleSaveConfiguration();
+          }}
+          disabled={form.saveStatus === "saving" || form.isLoadingConfig}
           className="inline-flex items-center gap-2 rounded-lg bg-ari-accent px-4 py-2 font-medium text-white disabled:cursor-not-allowed disabled:opacity-70"
         >
-          {saveStatus === "saving" ? (
+          {form.saveStatus === "saving" ? (
             <>
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
               Guardando configuración...
             </>
-          ) : saveStatus === "success" ? (
+          ) : form.saveStatus === "success" ? (
             saveSuccessText
-          ) : saveStatus === "error" ? (
+          ) : form.saveStatus === "error" ? (
             "Error al guardar configuración"
           ) : (
             "Guardar configuración"

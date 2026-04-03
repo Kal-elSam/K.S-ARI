@@ -175,13 +175,54 @@ async function updateConversationContext(id, newContext) {
  * Construye el system prompt dinámico usando toda la configuración del negocio.
  * Se consulta DB en cada mensaje para reflejar cambios del panel inmediatamente.
  */
+function formatServiceForPrompt(service) {
+  if (!service || typeof service !== 'object') {
+    return 'Servicio';
+  }
+  const name = service.name || 'Servicio';
+  const price = service.price ?? 'N/A';
+  const currency = service.currency === 'USD' ? 'USD' : 'MXN';
+
+  if (!service.price_type) {
+    return `${name} ($${price} ${currency}, ${service.duration ?? 'N/A'} min)`;
+  }
+
+  const priceTypeLabels = {
+    one_time: 'pago único',
+    monthly: 'renta mensual',
+    annual: 'renta anual',
+    per_session: 'por sesión',
+  };
+  const pt = service.price_type;
+  const tipoLabel = priceTypeLabels[pt] || pt;
+  const parts = [name];
+  if (service.description) {
+    parts.push(`(${String(service.description)})`);
+  }
+  parts.push(`— ${tipoLabel}: $${price} ${currency}`);
+
+  if ((pt === 'monthly' || pt === 'annual') && service.setup_fee != null && service.setup_fee !== '') {
+    const sf = Number(service.setup_fee);
+    if (!Number.isNaN(sf)) {
+      parts.push(`setup/inscripción: $${sf} ${currency}`);
+    }
+  }
+
+  if (pt === 'per_session' && service.duration != null && service.duration !== '') {
+    const mins = Number(service.duration);
+    if (!Number.isNaN(mins)) {
+      parts.push(`${mins} min`);
+    }
+  }
+
+  return parts.join(' ');
+}
+
 async function buildSystemPrompt(businessId, state) {
   const config = await getBusinessConfig(businessId);
   const safeServices = Array.isArray(config.services) ? config.services : [];
   const serviciosTexto = safeServices.length
-    ? safeServices
-        .map((service) => `${service.name || 'Servicio'} ($${service.price ?? 'N/A'}, ${service.duration ?? 'N/A'} min)`)
-        .join(', ')
+    ? safeServices.map((service) => formatServiceForPrompt(service)).join('; ')
     : 'Sin servicios configurados';
 
   const base = `Eres ARI, asistente virtual de ${config.name}.
