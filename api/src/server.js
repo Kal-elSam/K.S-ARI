@@ -15,9 +15,9 @@ if (process.env.SENTRY_DSN) {
   });
 }
 
-const { ENV_VARS_REQUERIDAS } = require('./constants');
-const { createApp } = require('./createApp');
-const { connectWithRetry } = require('./db');
+const { ENV_VARS_REQUERIDAS } = require('./core/constants');
+const { createApp } = require('./core/createApp');
+const { connectWithRetry } = require('./core/db');
 const { initActiveSchedules } = require('./social/socialService');
 
 console.log('\n📋 Verificación de variables de entorno:');

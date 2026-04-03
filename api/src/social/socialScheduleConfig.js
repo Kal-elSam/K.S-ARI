@@ -1,4 +1,4 @@
-const { pool } = require('../db');
+const { pool } = require('../core/db');
 const { VALID_SOCIAL_FREQUENCIES, VALID_IMAGE_SOURCES } = require('./socialConstants');
 const {
   normalizeStringArray,

@@ -1,4 +1,4 @@
-const { pool } = require('../db');
+const { pool } = require('../core/db');
 const social = require('../social/socialService');
 
 /**

@@ -1,6 +1,6 @@
 const cron = require('node-cron');
-const { pool } = require('../db');
-const { TIMEZONE } = require('../constants');
+const { pool } = require('../core/db');
+const { TIMEZONE } = require('../core/constants');
 const { VALID_SOCIAL_FREQUENCIES, VALID_IMAGE_SOURCES } = require('./socialConstants');
 const {
   scheduledSocialTimeouts,

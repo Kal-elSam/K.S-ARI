@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import {
   createSocialImage,
@@ -13,85 +13,25 @@ import {
   type SocialPost,
   type SocialImage,
   type SocialScheduleConfig,
-  type SocialScheduleFrequency,
   type SocialSchedulePlatform,
-  type SocialStatus,
   toggleSocialSchedule,
   upsertSocialScheduleConfig,
 } from "@/lib/api";
-
-type ToneOption = "Profesional" | "Casual" | "Divertido";
-type TabKey = "publicar" | "automatizacion" | "imagenes" | "historial";
-
-const toneOptions: ToneOption[] = ["Profesional", "Casual", "Divertido"];
-const platformOptions: Array<{ value: SocialSchedulePlatform; label: string }> = [
-  { value: "instagram", label: "Instagram" },
-  { value: "facebook", label: "Facebook" },
-];
-const frequencyOptions: Array<{ value: SocialScheduleFrequency; label: string }> = [
-  { value: "daily", label: "Diario" },
-  { value: "3x_week", label: "3 veces por semana" },
-  { value: "5x_week", label: "5 veces por semana" },
-];
-const imageSourceOptions = [
-  { value: "auto", label: "Ambas (recomendado)" },
-  { value: "own", label: "Mis imágenes primero" },
-  { value: "unsplash", label: "Unsplash automático" },
-] as const;
-
-function getStatusChip(status: SocialStatus): string {
-  switch (status) {
-    case "draft":
-      return "bg-slate-500/20 text-slate-200 border-slate-400/30";
-    case "scheduled":
-      return "bg-amber-500/20 text-amber-200 border-amber-400/30";
-    case "published":
-      return "bg-emerald-500/20 text-emerald-200 border-emerald-400/30";
-    case "failed":
-      return "bg-red-500/20 text-red-200 border-red-400/30";
-    default: {
-      const exhaustiveCheck: never = status;
-      return exhaustiveCheck;
-    }
-  }
-}
-
-function formatDate(value: string | null): string {
-  if (!value) return "-";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return new Intl.DateTimeFormat("es-MX", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(parsed);
-}
-
-function getNextPostFromSchedule(schedule: SocialScheduleConfig): string | null {
-  if (!schedule.is_active) return null;
-  const now = new Date();
-
-  for (let dayOffset = 0; dayOffset <= 14; dayOffset += 1) {
-    const date = new Date(now);
-    date.setDate(now.getDate() + dayOffset);
-    const day = date.getDay();
-    const inFrequency =
-      schedule.frequency === "daily" ||
-      (schedule.frequency === "3x_week" && (day === 1 || day === 3 || day === 5)) ||
-      (schedule.frequency === "5x_week" && day >= 1 && day <= 5);
-    if (!inFrequency) continue;
-
-    for (const time of schedule.post_times) {
-      const [hourText, minuteText] = time.split(":");
-      const hour = Number.parseInt(hourText, 10);
-      const minute = Number.parseInt(minuteText, 10);
-      const candidate = new Date(date);
-      candidate.setHours(hour, minute, 0, 0);
-      if (candidate > now) return candidate.toISOString();
-    }
-  }
-
-  return null;
-}
+import { SocialFeedback } from "@/features/social/components/social-feedback";
+import { SocialTabsNav } from "@/features/social/components/social-tabs-nav";
+import {
+  type TabKey,
+  type ToneOption,
+  frequencyOptions,
+  formatDate,
+  getNextPostFromSchedule,
+  getStatusChip,
+  imageSourceOptions,
+  platformOptions,
+  toneOptions,
+  useNextPostLabel,
+  useSocialPreview,
+} from "@/features/social/hooks/use-social-ui";
 
 export default function SocialPage() {
   const [activeTab, setActiveTab] = useState<TabKey>("publicar");
@@ -127,11 +67,8 @@ export default function SocialPage() {
   const [isTogglingSchedule, setIsTogglingSchedule] = useState<boolean>(false);
   const [isAddingImage, setIsAddingImage] = useState<boolean>(false);
 
-  const preview = useMemo(() => `${content}${hashtags ? `\n\n${hashtags}` : ""}`, [content, hashtags]);
-  const nextPostLabel = useMemo(() => {
-    const value = nextPostOverride || getNextPostFromSchedule(schedule);
-    return value ? formatDate(value) : "Sin publicación programada";
-  }, [nextPostOverride, schedule]);
+  const preview = useSocialPreview(content, hashtags);
+  const nextPostLabel = useNextPostLabel(schedule, nextPostOverride);
 
   const loadPosts = async () => {
     try {
@@ -357,34 +294,8 @@ export default function SocialPage() {
         <p className="mt-1 text-sm text-slate-400">Publica ahora, automatiza y gestiona tu banco de imágenes.</p>
       </header>
 
-      {error ? (
-        <p className="rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</p>
-      ) : null}
-      {success ? (
-        <p className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">{success}</p>
-      ) : null}
-
-      <nav className="flex flex-wrap gap-2">
-        {[
-          { id: "publicar", label: "Publicar ahora" },
-          { id: "automatizacion", label: "Automatización" },
-          { id: "imagenes", label: "Banco de imágenes" },
-          { id: "historial", label: "Historial" },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setActiveTab(tab.id as TabKey)}
-            className={`rounded-lg px-3 py-2 text-sm font-medium ${
-              activeTab === tab.id
-                ? "bg-ari-accent text-white"
-                : "border border-white/10 bg-white/5 text-slate-300"
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </nav>
+      <SocialFeedback error={error} success={success} />
+      <SocialTabsNav activeTab={activeTab} onChange={setActiveTab} />
 
       {activeTab === "publicar" ? (
         <article className="space-y-4 rounded-xl border border-white/10 bg-ari-card p-4">
@@ -436,7 +347,7 @@ export default function SocialPage() {
           <div className="grid gap-3 md:grid-cols-2">
             <label className="space-y-1 text-sm text-slate-300">
               <span>Frecuencia</span>
-              <select value={schedule.frequency} onChange={(event) => setSchedule((previous) => ({ ...previous, frequency: event.target.value as SocialScheduleFrequency }))} className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-white outline-none focus:border-ari-accent">
+              <select value={schedule.frequency} onChange={(event) => setSchedule((previous) => ({ ...previous, frequency: event.target.value as SocialScheduleConfig["frequency"] }))} className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-white outline-none focus:border-ari-accent">
                 {frequencyOptions.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}

@@ -57,6 +57,15 @@ CREATE TABLE IF NOT EXISTS business_config (
 CREATE INDEX IF NOT EXISTS idx_business_config_business_id
     ON business_config(business_id);
 
+-- Tablas antiguas (p. ej. Railway): columnas faltantes. Ver database/migrations/001_upgrade_legacy_business_config.sql
+ALTER TABLE business_config ADD COLUMN IF NOT EXISTS slogan VARCHAR(200);
+ALTER TABLE business_config ADD COLUMN IF NOT EXISTS tone VARCHAR(80) NOT NULL DEFAULT 'amigable';
+ALTER TABLE business_config ADD COLUMN IF NOT EXISTS welcome_message TEXT;
+ALTER TABLE business_config ADD COLUMN IF NOT EXISTS active_announcement TEXT;
+ALTER TABLE business_config ADD COLUMN IF NOT EXISTS services JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE business_config ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE business_config ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+
 -- ============================================================================
 -- TABLA: social_posts
 -- Publicaciones de redes sociales (draft/scheduled/published/failed)
@@ -159,6 +168,3 @@ SET
     active_announcement = EXCLUDED.active_announcement,
     services = EXCLUDED.services,
     updated_at = CURRENT_TIMESTAMP;
-
-ALTER TABLE business_config
-    ADD COLUMN IF NOT EXISTS slogan VARCHAR(200);

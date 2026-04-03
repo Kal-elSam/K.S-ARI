@@ -14,6 +14,13 @@ import {
 import type { BotTone, BusinessType, SaveStatus, ServiceItem } from "./settings-types";
 import { serviceToPayload, toServiceItem } from "./service-model";
 
+function messageFromUnknownError(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim();
+  }
+  return fallback;
+}
+
 export function useSettingsForm() {
   const [businessName, setBusinessName] = useState<string>("Clínica ARI Demo");
   const [slogan, setSlogan] = useState<string>("");
@@ -68,9 +75,11 @@ export function useSettingsForm() {
           accent_color: config.accent_color || defaultAccentColor,
           services: Array.isArray(config.services) ? config.services : [],
         });
-      } catch {
+      } catch (error) {
         if (isMounted) {
-          setLoadError("No se pudo cargar la configuración actual");
+          setLoadError(
+            messageFromUnknownError(error, "No se pudo cargar la configuración actual")
+          );
         }
       } finally {
         if (isMounted) {
@@ -174,9 +183,9 @@ export function useSettingsForm() {
       setLastPersistedConfig(payload);
       setSaveStatus("success");
       resetSaveStatusLater();
-    } catch {
+    } catch (error) {
       setSaveStatus("error");
-      setLoadError("No se pudo guardar la configuración");
+      setLoadError(messageFromUnknownError(error, "No se pudo guardar la configuración"));
       resetSaveStatusLater();
     }
   }, [buildCurrentPayload, resetSaveStatusLater]);
@@ -196,9 +205,9 @@ export function useSettingsForm() {
       setLastPersistedConfig(payload);
       setSaveStatus("success");
       resetSaveStatusLater();
-    } catch {
+    } catch (error) {
       setSaveStatus("error");
-      setLoadError("No se pudo publicar el anuncio");
+      setLoadError(messageFromUnknownError(error, "No se pudo publicar el anuncio"));
       resetSaveStatusLater();
     }
   }, [activeAnnouncement, buildCurrentPayload, lastPersistedConfig, resetSaveStatusLater]);

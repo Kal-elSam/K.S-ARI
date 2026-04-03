@@ -1,10 +1,10 @@
-const { getOrCreateConversation } = require('../conversation');
-const { sendWhatsAppMessage } = require('../whatsapp');
+const { getOrCreateConversation } = require('../whatsapp/conversation');
+const { sendWhatsAppMessage } = require('../whatsapp/whatsapp');
 const {
   handleReadyToBook,
   handleSlotSelection,
   handleGeneralState,
-} = require('../webhookHandlers');
+} = require('../whatsapp/webhookHandlers');
 
 /**
  * @param {import('express').Express} app

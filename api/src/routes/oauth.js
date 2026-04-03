@@ -1,5 +1,5 @@
-const { pool } = require('../db');
-const { GOOGLE_TOKEN_URL } = require('../googleCalendar');
+const { pool } = require('../core/db');
+const { GOOGLE_TOKEN_URL } = require('../booking/googleCalendar');
 
 /**
  * @param {import('express').Express} app

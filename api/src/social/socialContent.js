@@ -1,4 +1,4 @@
-const { pool } = require('../db');
+const { pool } = require('../core/db');
 const { callAI } = require('../groq');
 const { getBusinessConfig } = require('../businessConfig');
 const { VALID_IMAGE_SOURCES, SOCIAL_PLACEHOLDER_IMAGE_URL } = require('./socialConstants');

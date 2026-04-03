@@ -1,4 +1,4 @@
-const { pool } = require('./db');
+const { pool } = require('./core/db');
 
 /**
  * Construye el system prompt dinámico usando toda la configuración del negocio.

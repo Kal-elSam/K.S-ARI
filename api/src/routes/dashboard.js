@@ -1,5 +1,6 @@
-const { pool } = require('../db');
-const { GOOGLE_CALENDAR_BASE, getValidAccessToken } = require('../googleCalendar');
+const { pool } = require('../core/db');
+const { normalizeBusinessConfigPayload } = require('../core/normalizeBusinessConfigPayload');
+const { GOOGLE_CALENDAR_BASE, getValidAccessToken } = require('../booking/googleCalendar');
 
 /**
  * @param {import('express').Express} app
@@ -171,28 +172,23 @@ function registerDashboardRoutes(app) {
       return res.status(200).json(rows[0]);
     } catch (error) {
       console.error('[ERROR API] /api/config/:businessId (GET):', error.message);
-      return res.status(500).json({ error: 'No se pudo leer la configuración del negocio.' });
+      const isDev = process.env.NODE_ENV !== 'production';
+      return res.status(500).json({
+        error: 'No se pudo leer la configuración del negocio.',
+        ...(isDev && error?.message ? { detail: error.message } : {}),
+      });
     }
   });
 
   app.post('/api/config/:businessId', async (req, res) => {
     try {
       const { businessId } = req.params;
-      const {
-        name,
-        slogan,
-        type,
-        start_hour,
-        end_hour,
-        tone,
-        welcome_message,
-        active_announcement,
-        services,
-      } = req.body;
 
-      if (!Array.isArray(services)) {
+      if (!Array.isArray(req.body?.services)) {
         return res.status(400).json({ error: 'El campo services debe ser un arreglo JSON.' });
       }
+
+      const n = normalizeBusinessConfigPayload(req.body, businessId);
 
       const query = `
       INSERT INTO business_config (
@@ -215,23 +211,27 @@ function registerDashboardRoutes(app) {
     `;
 
       const values = [
-        businessId,
-        name,
-        slogan || '',
-        type,
-        start_hour,
-        end_hour,
-        tone,
-        welcome_message || '',
-        active_announcement || '',
-        JSON.stringify(services),
+        n.businessId,
+        n.name,
+        n.slogan,
+        n.type,
+        n.start_hour,
+        n.end_hour,
+        n.tone,
+        n.welcome_message,
+        n.active_announcement,
+        JSON.stringify(n.services),
       ];
 
       const result = await pool.query(query, values);
       return res.status(200).json({ success: true, config: result.rows[0] });
     } catch (error) {
       console.error('[ERROR API] /api/config/:businessId (POST):', error.message);
-      return res.status(500).json({ error: 'No se pudo actualizar la configuración del negocio.' });
+      const isDev = process.env.NODE_ENV !== 'production';
+      return res.status(500).json({
+        error: 'No se pudo actualizar la configuración del negocio.',
+        ...(isDev && error?.message ? { detail: error.message } : {}),
+      });
     }
   });
 }

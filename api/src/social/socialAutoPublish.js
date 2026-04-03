@@ -1,4 +1,4 @@
-const { pool } = require('../db');
+const { pool } = require('../core/db');
 const { generatePostContent, getImageForPost } = require('./socialContent');
 const { publishToInstagram, publishToFacebook } = require('./socialGraphApi');
 const { buildSocialCaption, normalizePlatformsArray } = require('./socialHelpers');
