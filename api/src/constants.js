@@ -1,0 +1,19 @@
+/** Zona horaria para toda la aplicación */
+const TIMEZONE = 'America/Mexico_City';
+
+const ENV_VARS_REQUERIDAS = [
+  'PORT',
+  'DATABASE_URL',
+  'WHATSAPP_TOKEN',
+  'WHATSAPP_PHONE_ID',
+  'WEBHOOK_VERIFY_TOKEN',
+  'GROQ_API_KEY',
+  'GOOGLE_CLIENT_ID',
+  'GOOGLE_CLIENT_SECRET',
+  'GOOGLE_REDIRECT_URI',
+  'META_PAGE_ACCESS_TOKEN',
+  'META_IG_ACCOUNT_ID',
+  'META_PAGE_ID',
+];
+
+module.exports = { TIMEZONE, ENV_VARS_REQUERIDAS };
