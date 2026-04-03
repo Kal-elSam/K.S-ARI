@@ -805,14 +805,17 @@ async function publishToFacebook(content, imageUrl) {
       throw new Error('META_PAGE_ACCESS_TOKEN no está configurado en .env');
     }
     const pageId = process.env.META_PAGE_ID;
-
     if (!pageId) {
       throw new Error('META_PAGE_ID no está configurado en .env');
     }
 
     const url = `${GRAPH_API_BASE}/${pageId}/feed`;
+    const caption = buildSocialCaption(content, []);
+
+    // Token en el body (Graph API /feed): Facebook Pages suele comportarse mejor así que con Bearer.
     const payload = new URLSearchParams({
-      message: String(content || '').trim(),
+      message: caption,
+      access_token: pageAccessToken,
     });
 
     const safeImageUrl = String(imageUrl || '').trim();
@@ -822,18 +825,19 @@ async function publishToFacebook(content, imageUrl) {
 
     const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Authorization: `Bearer ${pageAccessToken}`,
-      },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: payload,
     });
 
     const data = await response.json();
-    if (!response.ok || !data.id) {
+    if (!response.ok) {
+      throw new Error(data.error?.message || 'Error Facebook');
+    }
+    if (!data.id) {
       throw new Error(data.error?.message || 'No se pudo publicar en Facebook.');
     }
 
+    console.log(`[SOCIAL] Facebook post publicado: ${data.id}`);
     return data.id;
   } catch (error) {
     console.error('[ERROR SOCIAL] publishToFacebook:', error.message);
