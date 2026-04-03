@@ -18,6 +18,7 @@ if (process.env.SENTRY_DSN) {
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
+const cron = require('node-cron');
 
 // ----------------------------------------------------------------------------
 // VALIDACIÓN DE VARIABLES DE ENTORNO
@@ -648,6 +649,86 @@ const GRAPH_API_BASE = 'https://graph.facebook.com/v18.0';
 const SOCIAL_PLACEHOLDER_IMAGE_URL =
   'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=1080';
 const scheduledSocialTimeouts = new Map();
+const activeSocialJobsByBusiness = new Map();
+const topicRotationByBusiness = new Map();
+const VALID_SOCIAL_FREQUENCIES = new Set(['daily', '3x_week', '5x_week']);
+const VALID_IMAGE_SOURCES = new Set(['own', 'unsplash', 'auto']);
+
+function normalizeStringArray(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+}
+
+function normalizePlatformsArray(platforms) {
+  const values = normalizeStringArray(platforms)
+    .map((item) => item.toLowerCase())
+    .filter((item) => item === 'instagram' || item === 'facebook');
+
+  return Array.from(new Set(values));
+}
+
+function normalizePostTimes(postTimes) {
+  const regex = /^([01]\d|2[0-3]):([0-5]\d)$/;
+  return normalizeStringArray(postTimes).filter((time) => regex.test(time));
+}
+
+function isValidHttpUrl(rawUrl) {
+  try {
+    const parsed = new URL(String(rawUrl || '').trim());
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function getCronDayOfWeek(frequency) {
+  if (frequency === '3x_week') {
+    return '1,3,5';
+  }
+  if (frequency === '5x_week') {
+    return '1-5';
+  }
+  return '*';
+}
+
+function buildCronExpression(time, frequency) {
+  const [hour, minute] = String(time).split(':');
+  const safeHour = Number.parseInt(hour, 10);
+  const safeMinute = Number.parseInt(minute, 10);
+  const dayOfWeek = getCronDayOfWeek(frequency);
+  return `${safeMinute} ${safeHour} * * ${dayOfWeek}`;
+}
+
+function getDefaultSocialSchedule(businessId) {
+  return {
+    business_id: String(businessId || 'demo').trim() || 'demo',
+    is_active: false,
+    frequency: 'daily',
+    post_times: ['10:00', '18:00'],
+    topics: [],
+    platforms: ['instagram', 'facebook'],
+    tone: 'Profesional',
+    image_source: 'auto',
+  };
+}
+
+function getNextTopicForBusiness(businessId, topics) {
+  const safeTopics = normalizeStringArray(topics);
+  if (safeTopics.length === 0) {
+    return 'servicios';
+  }
+
+  const currentIndex = topicRotationByBusiness.get(businessId) || 0;
+  const normalizedIndex = currentIndex % safeTopics.length;
+  const selectedTopic = safeTopics[normalizedIndex];
+  topicRotationByBusiness.set(businessId, normalizedIndex + 1);
+  return selectedTopic;
+}
 
 function validateSocialPlatform(platform) {
   const safePlatform = String(platform || '').toLowerCase();
@@ -869,6 +950,306 @@ async function publishByPlatform(platform, content, hashtags, imageUrl) {
     return result;
   } catch (error) {
     console.error('[ERROR SOCIAL] publishByPlatform:', error.message);
+    throw error;
+  }
+}
+
+async function getSocialScheduleConfig(businessId) {
+  try {
+    const safeBusinessId = String(businessId || 'demo').trim() || 'demo';
+    const { rows } = await pool.query(
+      'SELECT * FROM social_schedules WHERE business_id = $1 LIMIT 1',
+      [safeBusinessId]
+    );
+
+    if (rows.length === 0) {
+      return getDefaultSocialSchedule(safeBusinessId);
+    }
+
+    const schedule = rows[0];
+    return {
+      business_id: schedule.business_id,
+      is_active: Boolean(schedule.is_active),
+      frequency: VALID_SOCIAL_FREQUENCIES.has(schedule.frequency) ? schedule.frequency : 'daily',
+      post_times: normalizePostTimes(schedule.post_times),
+      topics: normalizeStringArray(schedule.topics),
+      platforms: normalizePlatformsArray(schedule.platforms),
+      tone: String(schedule.tone || 'Profesional').trim() || 'Profesional',
+      image_source: VALID_IMAGE_SOURCES.has(schedule.image_source) ? schedule.image_source : 'auto',
+    };
+  } catch (error) {
+    console.error('[ERROR SOCIAL] getSocialScheduleConfig:', error.message);
+    return getDefaultSocialSchedule(businessId);
+  }
+}
+
+function doesTopicMatch(topic, tags) {
+  const safeTopic = String(topic || '').trim().toLowerCase();
+  const safeTags = normalizeStringArray(tags).map((tag) => tag.toLowerCase());
+  if (!safeTopic || safeTags.length === 0) {
+    return false;
+  }
+
+  return safeTags.some((tag) => safeTopic.includes(tag) || tag.includes(safeTopic));
+}
+
+async function getImageForPost(businessId, topic, imageSource) {
+  try {
+    const safeBusinessId = String(businessId || 'demo').trim() || 'demo';
+    const safeTopic = String(topic || '').trim();
+    const safeImageSource = VALID_IMAGE_SOURCES.has(imageSource) ? imageSource : 'auto';
+
+    if (safeImageSource === 'own' || safeImageSource === 'auto') {
+      const ownImagesResult = await pool.query(
+        `SELECT id, url, topic_tags
+         FROM social_images
+         WHERE business_id = $1 AND source = 'own'
+         ORDER BY created_at DESC`,
+        [safeBusinessId]
+      );
+
+      if (ownImagesResult.rows.length > 0) {
+        const exactMatch = ownImagesResult.rows.find((image) => doesTopicMatch(safeTopic, image.topic_tags));
+        const selected = exactMatch || ownImagesResult.rows[0];
+        const selectedUrl = String(selected.url || '').trim();
+        if (selectedUrl) {
+          return selectedUrl;
+        }
+      }
+    }
+
+    if (safeImageSource === 'unsplash' || safeImageSource === 'auto') {
+      const unsplashKey = String(process.env.UNSPLASH_ACCESS_KEY || '').trim();
+      if (unsplashKey) {
+        const query = safeTopic || 'negocios mexico';
+        const url = new URL('https://api.unsplash.com/search/photos');
+        url.searchParams.set('query', query);
+        url.searchParams.set('orientation', 'landscape');
+        url.searchParams.set('per_page', '1');
+
+        const response = await fetch(url.toString(), {
+          headers: {
+            Authorization: `Client-ID ${unsplashKey}`,
+          },
+        });
+        const data = await response.json();
+
+        if (response.ok && Array.isArray(data.results) && data.results.length > 0) {
+          const imageUrl = String(data.results[0]?.urls?.regular || '').trim();
+          if (imageUrl) {
+            return imageUrl;
+          }
+        }
+      }
+    }
+
+    return SOCIAL_PLACEHOLDER_IMAGE_URL;
+  } catch (error) {
+    console.error('[ERROR SOCIAL] getImageForPost:', error.message);
+    return SOCIAL_PLACEHOLDER_IMAGE_URL;
+  }
+}
+
+async function autoGenerateAndPublish(businessId, topic, platforms, tone, imageSource = 'auto') {
+  try {
+    const safeBusinessId = String(businessId || 'demo').trim() || 'demo';
+    const safeTopic = String(topic || '').trim();
+    const safeTone = String(tone || 'Profesional').trim() || 'Profesional';
+    const safePlatforms = normalizePlatformsArray(platforms);
+
+    if (!safeTopic) {
+      throw new Error('El tema del post es obligatorio para autopublicar.');
+    }
+    if (safePlatforms.length === 0) {
+      throw new Error('Debes indicar al menos una plataforma para autopublicar.');
+    }
+
+    const generated = await generatePostContent(safeBusinessId, safeTopic, safeTone);
+    const imageUrl = await getImageForPost(safeBusinessId, safeTopic, imageSource);
+    const caption = buildSocialCaption(generated.content, generated.hashtags);
+
+    let igPostId = null;
+    let fbPostId = null;
+
+    for (const platform of safePlatforms) {
+      if (platform === 'instagram') {
+        igPostId = await publishToInstagram(caption, imageUrl);
+      }
+      if (platform === 'facebook') {
+        fbPostId = await publishToFacebook(caption, imageUrl);
+      }
+    }
+
+    const platformForDb =
+      safePlatforms.length === 2
+        ? 'both'
+        : safePlatforms[0];
+
+    await pool.query(
+      `INSERT INTO social_posts (
+        business_id,
+        platform,
+        content,
+        image_url,
+        hashtags,
+        status,
+        published_at,
+        ig_post_id,
+        fb_post_id
+      )
+      VALUES ($1, $2, $3, $4, $5, 'published', CURRENT_TIMESTAMP, $6, $7)`,
+      [
+        safeBusinessId,
+        platformForDb,
+        generated.content,
+        imageUrl,
+        generated.hashtags,
+        igPostId,
+        fbPostId,
+      ]
+    );
+
+    return {
+      ig_post_id: igPostId,
+      fb_post_id: fbPostId,
+      content: generated.content,
+      imageUrl,
+    };
+  } catch (error) {
+    console.error('[ERROR SOCIAL] autoGenerateAndPublish:', error.message);
+    throw error;
+  }
+}
+
+function matchesFrequencyDate(date, frequency) {
+  const day = date.getDay(); // 0=domingo, 1=lunes, ... 6=sábado
+  if (frequency === '3x_week') {
+    return day === 1 || day === 3 || day === 5;
+  }
+  if (frequency === '5x_week') {
+    return day >= 1 && day <= 5;
+  }
+  return true;
+}
+
+function getNextPostDate(schedule) {
+  const safeTimes = normalizePostTimes(schedule.post_times);
+  const times = safeTimes.length > 0 ? safeTimes : ['10:00'];
+  const frequency = VALID_SOCIAL_FREQUENCIES.has(schedule.frequency) ? schedule.frequency : 'daily';
+  const now = new Date();
+
+  for (let offsetDays = 0; offsetDays <= 14; offsetDays++) {
+    const candidateDate = new Date(now);
+    candidateDate.setDate(now.getDate() + offsetDays);
+
+    if (!matchesFrequencyDate(candidateDate, frequency)) {
+      continue;
+    }
+
+    for (const time of times) {
+      const [hour, minute] = time.split(':').map((part) => Number.parseInt(part, 10));
+      const candidate = new Date(candidateDate);
+      candidate.setHours(hour, minute, 0, 0);
+      if (candidate > now) {
+        return candidate.toISOString();
+      }
+    }
+  }
+
+  return null;
+}
+
+async function stopAutoPublisher(businessId) {
+  try {
+    const safeBusinessId = String(businessId || 'demo').trim() || 'demo';
+    const jobs = activeSocialJobsByBusiness.get(safeBusinessId) || [];
+    for (const job of jobs) {
+      job.stop();
+    }
+    activeSocialJobsByBusiness.delete(safeBusinessId);
+    topicRotationByBusiness.delete(safeBusinessId);
+  } catch (error) {
+    console.error('[ERROR SOCIAL] stopAutoPublisher:', error.message);
+  }
+}
+
+async function startAutoPublisher(businessId) {
+  try {
+    const safeBusinessId = String(businessId || 'demo').trim() || 'demo';
+    const schedule = await getSocialScheduleConfig(safeBusinessId);
+
+    await stopAutoPublisher(safeBusinessId);
+
+    if (!schedule.is_active) {
+      return { started: false, nextPost: null };
+    }
+
+    const safeTopics = normalizeStringArray(schedule.topics);
+    const topics = safeTopics.length > 0 ? safeTopics : ['servicios', 'promociones', 'tips'];
+    const safePlatforms = normalizePlatformsArray(schedule.platforms);
+    const platforms = safePlatforms.length > 0 ? safePlatforms : ['instagram', 'facebook'];
+    const safeTimes = normalizePostTimes(schedule.post_times);
+    const postTimes = safeTimes.length > 0 ? safeTimes : ['10:00'];
+    const frequency = VALID_SOCIAL_FREQUENCIES.has(schedule.frequency) ? schedule.frequency : 'daily';
+    const tone = String(schedule.tone || 'Profesional').trim() || 'Profesional';
+    const imageSource = VALID_IMAGE_SOURCES.has(schedule.image_source) ? schedule.image_source : 'auto';
+    const jobs = [];
+
+    for (const time of postTimes) {
+      const expression = buildCronExpression(time, frequency);
+      const job = cron.schedule(
+        expression,
+        async () => {
+          try {
+            const topic = getNextTopicForBusiness(safeBusinessId, topics);
+            const publication = await autoGenerateAndPublish(
+              safeBusinessId,
+              topic,
+              platforms,
+              tone,
+              imageSource
+            );
+            console.log(
+              `[CRON] Publicación automática completada para ${safeBusinessId} (${new Date().toISOString()}) | topic="${topic}" | ig=${publication.ig_post_id || '-'} | fb=${publication.fb_post_id || '-'}`
+            );
+          } catch (error) {
+            console.error('[CRON] Error en publicación automática:', error.message);
+          }
+        },
+        { timezone: TIMEZONE }
+      );
+      jobs.push(job);
+    }
+
+    activeSocialJobsByBusiness.set(safeBusinessId, jobs);
+    return {
+      started: jobs.length > 0,
+      nextPost: getNextPostDate({
+        frequency,
+        post_times: postTimes,
+      }),
+    };
+  } catch (error) {
+    console.error('[ERROR SOCIAL] startAutoPublisher:', error.message);
+    throw error;
+  }
+}
+
+async function initActiveSchedules() {
+  try {
+    const { rows } = await pool.query(
+      `SELECT business_id
+       FROM social_schedules
+       WHERE is_active = true`
+    );
+
+    for (const row of rows) {
+      await startAutoPublisher(row.business_id);
+    }
+
+    console.log(`[CRON] Schedules activos inicializados: ${rows.length}`);
+  } catch (error) {
+    console.error('[ERROR SOCIAL] initActiveSchedules:', error.message);
     throw error;
   }
 }
@@ -1325,6 +1706,226 @@ app.post('/api/social/generate', async (req, res) => {
   }
 });
 
+app.post('/api/social/schedule/config', async (req, res) => {
+  try {
+    const {
+      businessId,
+      frequency,
+      post_times,
+      topics,
+      platforms,
+      tone,
+      image_source,
+    } = req.body;
+
+    const safeBusinessId = String(businessId || '').trim();
+    if (!safeBusinessId) {
+      return res.status(400).json({ error: 'businessId es obligatorio.' });
+    }
+    if (post_times !== undefined && !Array.isArray(post_times)) {
+      return res.status(400).json({ error: 'post_times debe ser un arreglo JSON.' });
+    }
+    if (topics !== undefined && !Array.isArray(topics)) {
+      return res.status(400).json({ error: 'topics debe ser un arreglo JSON.' });
+    }
+    if (platforms !== undefined && !Array.isArray(platforms)) {
+      return res.status(400).json({ error: 'platforms debe ser un arreglo JSON.' });
+    }
+
+    const safeFrequency = VALID_SOCIAL_FREQUENCIES.has(frequency) ? frequency : 'daily';
+    const safePostTimes = normalizePostTimes(post_times);
+    const safeTopics = normalizeStringArray(topics);
+    const safePlatforms = normalizePlatformsArray(platforms);
+    const safeTone = String(tone || 'Profesional').trim() || 'Profesional';
+    const safeImageSource = VALID_IMAGE_SOURCES.has(image_source) ? image_source : 'auto';
+
+    const result = await pool.query(
+      `INSERT INTO social_schedules (
+        business_id,
+        frequency,
+        post_times,
+        topics,
+        platforms,
+        tone,
+        image_source
+      )
+      VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6, $7)
+      ON CONFLICT (business_id) DO UPDATE
+      SET
+        frequency = EXCLUDED.frequency,
+        post_times = EXCLUDED.post_times,
+        topics = EXCLUDED.topics,
+        platforms = EXCLUDED.platforms,
+        tone = EXCLUDED.tone,
+        image_source = EXCLUDED.image_source,
+        updated_at = CURRENT_TIMESTAMP
+      RETURNING *`,
+      [
+        safeBusinessId,
+        safeFrequency,
+        JSON.stringify(safePostTimes.length > 0 ? safePostTimes : ['10:00', '18:00']),
+        JSON.stringify(safeTopics),
+        JSON.stringify(safePlatforms.length > 0 ? safePlatforms : ['instagram', 'facebook']),
+        safeTone,
+        safeImageSource,
+      ]
+    );
+
+    return res.status(200).json(result.rows[0]);
+  } catch (error) {
+    console.error('[ERROR API] /api/social/schedule/config:', error.message);
+    return res.status(500).json({ error: 'No se pudo guardar la configuración de automatización.' });
+  }
+});
+
+app.get('/api/social/schedule/config/:businessId', async (req, res) => {
+  try {
+    const { businessId } = req.params;
+    const config = await getSocialScheduleConfig(businessId);
+    return res.status(200).json(config);
+  } catch (error) {
+    console.error('[ERROR API] /api/social/schedule/config/:businessId:', error.message);
+    return res.status(500).json({ error: 'No se pudo leer la configuración de automatización.' });
+  }
+});
+
+app.post('/api/social/schedule/toggle', async (req, res) => {
+  try {
+    const { businessId, active } = req.body;
+    const safeBusinessId = String(businessId || '').trim();
+    if (!safeBusinessId) {
+      return res.status(400).json({ error: 'businessId es obligatorio.' });
+    }
+    if (typeof active !== 'boolean') {
+      return res.status(400).json({ error: 'El campo active debe ser booleano.' });
+    }
+
+    await pool.query(
+      `INSERT INTO social_schedules (business_id, is_active)
+       VALUES ($1, $2)
+       ON CONFLICT (business_id) DO UPDATE
+       SET is_active = EXCLUDED.is_active, updated_at = CURRENT_TIMESTAMP`,
+      [safeBusinessId, active]
+    );
+
+    let nextPost = null;
+    if (active) {
+      const result = await startAutoPublisher(safeBusinessId);
+      nextPost = result.nextPost;
+    } else {
+      await stopAutoPublisher(safeBusinessId);
+    }
+
+    return res.status(200).json({ success: true, is_active: active, nextPost });
+  } catch (error) {
+    console.error('[ERROR API] /api/social/schedule/toggle:', error.message);
+    return res.status(500).json({ error: 'No se pudo actualizar el estado de automatización.' });
+  }
+});
+
+app.post('/api/social/images', async (req, res) => {
+  try {
+    const { businessId, url, topic_tags } = req.body;
+    const safeBusinessId = String(businessId || '').trim();
+    const safeUrl = String(url || '').trim();
+    const safeTopicTags = normalizeStringArray(topic_tags);
+
+    if (!safeBusinessId) {
+      return res.status(400).json({ error: 'businessId es obligatorio.' });
+    }
+    if (!safeUrl || !isValidHttpUrl(safeUrl)) {
+      return res.status(400).json({ error: 'url debe ser una URL válida.' });
+    }
+    if (topic_tags !== undefined && !Array.isArray(topic_tags)) {
+      return res.status(400).json({ error: 'topic_tags debe ser un arreglo JSON.' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO social_images (business_id, url, topic_tags, source)
+       VALUES ($1, $2, $3::jsonb, 'own')
+       RETURNING *`,
+      [safeBusinessId, safeUrl, JSON.stringify(safeTopicTags)]
+    );
+
+    return res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('[ERROR API] /api/social/images:', error.message);
+    return res.status(500).json({ error: 'No se pudo guardar la imagen.' });
+  }
+});
+
+app.get('/api/social/images/:businessId', async (req, res) => {
+  try {
+    const { businessId } = req.params;
+    const safeBusinessId = String(businessId || '').trim();
+    if (!safeBusinessId) {
+      return res.status(400).json({ error: 'businessId es obligatorio.' });
+    }
+
+    const { rows } = await pool.query(
+      `SELECT id, business_id, url, topic_tags, source, created_at
+       FROM social_images
+       WHERE business_id = $1
+       ORDER BY created_at DESC`,
+      [safeBusinessId]
+    );
+
+    return res.status(200).json(rows);
+  } catch (error) {
+    console.error('[ERROR API] /api/social/images/:businessId:', error.message);
+    return res.status(500).json({ error: 'No se pudo obtener el banco de imágenes.' });
+  }
+});
+
+app.delete('/api/social/images/:imageId', async (req, res) => {
+  try {
+    const { imageId } = req.params;
+    const result = await pool.query('DELETE FROM social_images WHERE id = $1 RETURNING id', [imageId]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Imagen no encontrada.' });
+    }
+
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    console.error('[ERROR API] /api/social/images/:imageId:', error.message);
+    return res.status(500).json({ error: 'No se pudo eliminar la imagen.' });
+  }
+});
+
+app.post('/api/social/publish/now', async (req, res) => {
+  try {
+    const { businessId, topic, platforms, tone } = req.body;
+    const safeBusinessId = String(businessId || 'demo').trim() || 'demo';
+    if (platforms !== undefined && !Array.isArray(platforms)) {
+      return res.status(400).json({ error: 'platforms debe ser un arreglo JSON.' });
+    }
+    const schedule = await getSocialScheduleConfig(safeBusinessId);
+
+    const safeTopic = String(topic || '').trim() || getNextTopicForBusiness(safeBusinessId, schedule.topics);
+    const safeTone = String(tone || '').trim() || schedule.tone || 'Profesional';
+    const requestedPlatforms = normalizePlatformsArray(platforms);
+    const safePlatforms = requestedPlatforms.length > 0 ? requestedPlatforms : schedule.platforms;
+
+    const publication = await autoGenerateAndPublish(
+      safeBusinessId,
+      safeTopic,
+      safePlatforms,
+      safeTone,
+      schedule.image_source
+    );
+
+    return res.status(200).json({
+      success: true,
+      topic: safeTopic,
+      platforms: safePlatforms,
+      ...publication,
+    });
+  } catch (error) {
+    console.error('[ERROR API] /api/social/publish/now:', error.message);
+    return res.status(500).json({ error: 'No se pudo publicar ahora.' });
+  }
+});
+
 app.post('/api/social/publish', async (req, res) => {
   try {
     const { content, hashtags, platform, imageUrl, businessId } = req.body;
@@ -1770,7 +2371,10 @@ async function handleGeneralState(convId, from, businessId, currentState, userMe
 // ARRANQUE DEL SERVIDOR
 // ----------------------------------------------------------------------------
 connectWithRetry()
-  .then(() => {
+  .then(async () => {
+    await initActiveSchedules().catch((err) =>
+      console.error('[CRON] Error al iniciar schedules:', err.message)
+    );
     app.listen(PORT, () => {
       console.log(`\n🚀 Servidor ARI listo en el puerto ${PORT}`);
     });

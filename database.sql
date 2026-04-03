@@ -83,6 +83,43 @@ CREATE INDEX IF NOT EXISTS idx_social_posts_business_created
 CREATE INDEX IF NOT EXISTS idx_social_posts_status
     ON social_posts(status);
 
+-- ============================================================================
+-- TABLA: social_schedules
+-- Configuración de autopublicación por negocio.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS social_schedules (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    business_id VARCHAR(50) UNIQUE NOT NULL,
+    is_active BOOLEAN DEFAULT false,
+    frequency VARCHAR(20) DEFAULT 'daily', -- 'daily', '3x_week', '5x_week'
+    post_times JSONB DEFAULT '["10:00", "18:00"]'::jsonb, -- Horarios del día para publicar
+    topics JSONB DEFAULT '[]'::jsonb, -- Temas recurrentes
+    platforms JSONB DEFAULT '["instagram", "facebook"]'::jsonb,
+    tone VARCHAR(30) DEFAULT 'Profesional',
+    image_source VARCHAR(20) DEFAULT 'auto', -- 'own', 'unsplash', 'auto'
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_social_schedules_is_active
+    ON social_schedules(is_active);
+
+-- ============================================================================
+-- TABLA: social_images
+-- Banco de imágenes del negocio para autopublicación.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS social_images (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    business_id VARCHAR(50) NOT NULL,
+    url TEXT NOT NULL,
+    topic_tags JSONB DEFAULT '[]'::jsonb, -- Tags para matching de tema
+    source VARCHAR(20) DEFAULT 'own', -- 'own' o 'unsplash'
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_social_images_business_id
+    ON social_images(business_id);
+
 INSERT INTO business_config (
     business_id,
     name,

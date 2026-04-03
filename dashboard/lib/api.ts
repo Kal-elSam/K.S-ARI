@@ -78,6 +78,9 @@ export interface UpdateConfigResponse {
 
 export type SocialPlatform = "instagram" | "facebook" | "both";
 export type SocialStatus = "draft" | "scheduled" | "published" | "failed";
+export type SocialSchedulePlatform = "instagram" | "facebook";
+export type SocialScheduleFrequency = "daily" | "3x_week" | "5x_week";
+export type SocialImageSource = "own" | "unsplash" | "auto";
 
 export interface GenerateSocialPostPayload {
   topic: string;
@@ -129,6 +132,70 @@ export interface SocialPost {
   fb_post_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface SocialScheduleConfig {
+  business_id: string;
+  is_active: boolean;
+  frequency: SocialScheduleFrequency;
+  post_times: string[];
+  topics: string[];
+  platforms: SocialSchedulePlatform[];
+  tone: string;
+  image_source: SocialImageSource;
+}
+
+export interface UpsertSocialScheduleConfigPayload {
+  businessId: string;
+  frequency: SocialScheduleFrequency;
+  post_times: string[];
+  topics: string[];
+  platforms: SocialSchedulePlatform[];
+  tone: string;
+  image_source: SocialImageSource;
+}
+
+export interface ToggleSocialSchedulePayload {
+  businessId: string;
+  active: boolean;
+}
+
+export interface ToggleSocialScheduleResponse {
+  success: boolean;
+  is_active: boolean;
+  nextPost: string | null;
+}
+
+export interface SocialImage {
+  id: string;
+  business_id: string;
+  url: string;
+  topic_tags: string[];
+  source: "own" | "unsplash";
+  created_at: string;
+}
+
+export interface CreateSocialImagePayload {
+  businessId: string;
+  url: string;
+  topic_tags: string[];
+}
+
+export interface PublishNowPayload {
+  businessId: string;
+  topic?: string;
+  platforms?: SocialSchedulePlatform[];
+  tone?: string;
+}
+
+export interface PublishNowResponse {
+  success: boolean;
+  topic: string;
+  platforms: SocialSchedulePlatform[];
+  ig_post_id: string | null;
+  fb_post_id: string | null;
+  content: string;
+  imageUrl: string;
 }
 
 /**
@@ -233,5 +300,53 @@ export function getSocialPosts(businessId: string, status: string = "all"): Prom
 export function deleteSocialPost(id: string): Promise<{ success: boolean }> {
   return fetchAPI<{ success: boolean }>(`/api/social/posts/${encodeURIComponent(id)}`, {
     method: "DELETE",
+  });
+}
+
+export function getSocialScheduleConfig(businessId: string): Promise<SocialScheduleConfig> {
+  return fetchAPI<SocialScheduleConfig>(
+    `/api/social/schedule/config/${encodeURIComponent(businessId)}`
+  );
+}
+
+export function upsertSocialScheduleConfig(
+  payload: UpsertSocialScheduleConfigPayload
+): Promise<SocialScheduleConfig> {
+  return fetchAPI<SocialScheduleConfig>("/api/social/schedule/config", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function toggleSocialSchedule(
+  payload: ToggleSocialSchedulePayload
+): Promise<ToggleSocialScheduleResponse> {
+  return fetchAPI<ToggleSocialScheduleResponse>("/api/social/schedule/toggle", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getSocialImages(businessId: string): Promise<SocialImage[]> {
+  return fetchAPI<SocialImage[]>(`/api/social/images/${encodeURIComponent(businessId)}`);
+}
+
+export function createSocialImage(payload: CreateSocialImagePayload): Promise<SocialImage> {
+  return fetchAPI<SocialImage>("/api/social/images", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteSocialImage(imageId: string): Promise<{ success: boolean }> {
+  return fetchAPI<{ success: boolean }>(`/api/social/images/${encodeURIComponent(imageId)}`, {
+    method: "DELETE",
+  });
+}
+
+export function publishSocialNow(payload: PublishNowPayload): Promise<PublishNowResponse> {
+  return fetchAPI<PublishNowResponse>("/api/social/publish/now", {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
