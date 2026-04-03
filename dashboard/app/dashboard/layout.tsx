@@ -9,6 +9,7 @@ const navigationItems = [
   { href: "/dashboard/metrics", label: "Métricas" },
   { href: "/dashboard/inbox", label: "Inbox" },
   { href: "/dashboard/agenda", label: "Agenda" },
+  { href: "/dashboard/social", label: "📱 Redes sociales" },
   { href: "/dashboard/settings", label: "Configurador" }
 ];
 

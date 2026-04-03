@@ -76,6 +76,61 @@ export interface UpdateConfigResponse {
   config: BusinessConfig;
 }
 
+export type SocialPlatform = "instagram" | "facebook" | "both";
+export type SocialStatus = "draft" | "scheduled" | "published" | "failed";
+
+export interface GenerateSocialPostPayload {
+  topic: string;
+  tone: string;
+  businessId: string;
+}
+
+export interface GenerateSocialPostResponse {
+  content: string;
+  hashtags: string;
+  preview: string;
+}
+
+export interface PublishSocialPostPayload {
+  content: string;
+  hashtags: string;
+  platform: SocialPlatform;
+  imageUrl?: string;
+  businessId: string;
+}
+
+export interface PublishSocialPostResponse {
+  success: boolean;
+  ig_post_id?: string | null;
+  fb_post_id?: string | null;
+}
+
+export interface ScheduleSocialPostPayload extends PublishSocialPostPayload {
+  scheduledAt: string;
+}
+
+export interface ScheduleSocialPostResponse {
+  success: boolean;
+  post_id: string;
+  scheduledAt: string;
+}
+
+export interface SocialPost {
+  id: string;
+  business_id: string;
+  platform: SocialPlatform;
+  content: string;
+  image_url: string | null;
+  hashtags: string | null;
+  scheduled_at: string | null;
+  published_at: string | null;
+  status: SocialStatus;
+  ig_post_id: string | null;
+  fb_post_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 /**
  * Helper central para consumo de la API de ARI.
  * Maneja errores de red y HTTP en un solo lugar.
@@ -139,5 +194,44 @@ export function updateConfig(businessId: string, data: BusinessConfig): Promise<
   return fetchAPI<UpdateConfigResponse>(`/api/config/${encodeURIComponent(businessId)}`, {
     method: "POST",
     body: JSON.stringify(data),
+  });
+}
+
+export function generateSocialPost(
+  payload: GenerateSocialPostPayload
+): Promise<GenerateSocialPostResponse> {
+  return fetchAPI<GenerateSocialPostResponse>("/api/social/generate", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function publishSocialPost(payload: PublishSocialPostPayload): Promise<PublishSocialPostResponse> {
+  return fetchAPI<PublishSocialPostResponse>("/api/social/publish", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function scheduleSocialPost(
+  payload: ScheduleSocialPostPayload
+): Promise<ScheduleSocialPostResponse> {
+  return fetchAPI<ScheduleSocialPostResponse>("/api/social/schedule", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getSocialPosts(businessId: string, status: string = "all"): Promise<SocialPost[]> {
+  const params = new URLSearchParams({
+    businessId,
+    status,
+  });
+  return fetchAPI<SocialPost[]>(`/api/social/posts?${params.toString()}`);
+}
+
+export function deleteSocialPost(id: string): Promise<{ success: boolean }> {
+  return fetchAPI<{ success: boolean }>(`/api/social/posts/${encodeURIComponent(id)}`, {
+    method: "DELETE",
   });
 }

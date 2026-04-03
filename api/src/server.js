@@ -32,6 +32,9 @@ const ENV_VARS_REQUERIDAS = [
   'GOOGLE_CLIENT_ID',
   'GOOGLE_CLIENT_SECRET',
   'GOOGLE_REDIRECT_URI',
+  'META_SOCIAL_TOKEN',
+  'META_IG_ACCOUNT_ID',
+  'META_PAGE_ID',
 ];
 
 console.log('\n📋 Verificación de variables de entorno:');
@@ -638,6 +641,329 @@ async function callAI(systemPrompt, userMessage) {
 }
 
 // ----------------------------------------------------------------------------
+// INTEGRACIÓN SOCIAL (Meta Graph API + Groq)
+// ----------------------------------------------------------------------------
+
+const GRAPH_API_BASE = 'https://graph.facebook.com/v18.0';
+const SOCIAL_PLACEHOLDER_IMAGE_URL =
+  'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=1080';
+const scheduledSocialTimeouts = new Map();
+
+function validateSocialPlatform(platform) {
+  const safePlatform = String(platform || '').toLowerCase();
+  return safePlatform === 'instagram' || safePlatform === 'facebook' || safePlatform === 'both'
+    ? safePlatform
+    : null;
+}
+
+function formatHashtags(rawHashtags) {
+  if (Array.isArray(rawHashtags)) {
+    return rawHashtags
+      .map((tag) => String(tag || '').trim())
+      .filter(Boolean)
+      .map((tag) => (tag.startsWith('#') ? tag : `#${tag}`))
+      .slice(0, 5)
+      .join(' ');
+  }
+
+  if (typeof rawHashtags === 'string') {
+    return rawHashtags
+      .split(/\s+/)
+      .map((tag) => tag.trim())
+      .filter(Boolean)
+      .map((tag) => (tag.startsWith('#') ? tag : `#${tag}`))
+      .slice(0, 5)
+      .join(' ');
+  }
+
+  return '';
+}
+
+function buildSocialCaption(content, hashtags) {
+  const safeContent = String(content || '').trim();
+  const safeHashtags = String(hashtags || '').trim();
+  if (!safeHashtags) {
+    return safeContent;
+  }
+  return `${safeContent}\n\n${safeHashtags}`;
+}
+
+function getSocialToken() {
+  const token = process.env.META_SOCIAL_TOKEN;
+  if (!token) {
+    throw new Error('META_SOCIAL_TOKEN no está configurado en .env');
+  }
+  return token;
+}
+
+async function generatePostContent(businessId, topic, tone) {
+  try {
+    const safeBusinessId = String(businessId || 'demo').trim() || 'demo';
+    const safeTopic = String(topic || '').trim();
+    const safeTone = String(tone || 'Profesional').trim();
+
+    if (!safeTopic) {
+      throw new Error('El tema del post es obligatorio.');
+    }
+
+    const config = await getBusinessConfig(safeBusinessId);
+
+    const systemPrompt = `Eres estratega senior de redes sociales para negocios en México.
+Genera copy para Instagram y Facebook en español mexicano.
+Debes responder SOLO JSON válido con esta forma exacta:
+{"content":"...","hashtags":["#uno","#dos","#tres","#cuatro","#cinco"]}
+Reglas:
+- content máximo 150 palabras
+- incluir emojis adecuados al tono solicitado
+- hashtags exactamente 5, relevantes y en español cuando aplique
+- no agregues texto fuera del JSON`;
+
+    const userPrompt = `Negocio: ${config.name}
+Tipo: ${config.type}
+Slogan: ${config.slogan || 'Sin slogan'}
+Servicios: ${Array.isArray(config.services) ? JSON.stringify(config.services) : '[]'}
+Anuncio activo: ${config.active_announcement || 'Sin anuncio'}
+Tema del post: ${safeTopic}
+Tono: ${safeTone}
+`;
+
+    const aiRaw = await callAI(systemPrompt, userPrompt);
+    const cleaned = String(aiRaw || '').trim();
+
+    const extractedJson =
+      cleaned.match(/\{[\s\S]*\}/)?.[0] ||
+      '{"content":"No se pudo generar contenido.","hashtags":["#ari","#negocio","#mexico","#marketing","#social"]}';
+
+    const parsed = JSON.parse(extractedJson);
+    const content = String(parsed.content || '').trim();
+    const hashtags = formatHashtags(parsed.hashtags);
+
+    if (!content) {
+      throw new Error('La IA no devolvió contenido válido.');
+    }
+
+    return { content, hashtags };
+  } catch (error) {
+    console.error('[ERROR SOCIAL] generatePostContent:', error.message);
+    throw error;
+  }
+}
+
+async function publishToInstagram(content, imageUrl) {
+  try {
+    const token = getSocialToken();
+    const igAccountId = process.env.META_IG_ACCOUNT_ID;
+
+    if (!igAccountId) {
+      throw new Error('META_IG_ACCOUNT_ID no está configurado en .env');
+    }
+
+    const safeImageUrl = String(imageUrl || '').trim() || SOCIAL_PLACEHOLDER_IMAGE_URL;
+    const caption = buildSocialCaption(content, '');
+    const mediaUrl = `${GRAPH_API_BASE}/${igAccountId}/media`;
+    const publishUrl = `${GRAPH_API_BASE}/${igAccountId}/media_publish`;
+
+    const createResponse = await fetch(mediaUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        image_url: safeImageUrl,
+        caption,
+        access_token: token,
+      }),
+    });
+
+    const createData = await createResponse.json();
+    if (!createResponse.ok || !createData.id) {
+      throw new Error(createData.error?.message || 'No se pudo crear el contenedor de Instagram.');
+    }
+
+    const publishResponse = await fetch(publishUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        creation_id: createData.id,
+        access_token: token,
+      }),
+    });
+
+    const publishData = await publishResponse.json();
+    if (!publishResponse.ok || !publishData.id) {
+      throw new Error(publishData.error?.message || 'No se pudo publicar en Instagram.');
+    }
+
+    return publishData.id;
+  } catch (error) {
+    console.error('[ERROR SOCIAL] publishToInstagram:', error.message);
+    throw error;
+  }
+}
+
+async function publishToFacebook(content, imageUrl) {
+  try {
+    const token = getSocialToken();
+    const pageId = process.env.META_PAGE_ID;
+
+    if (!pageId) {
+      throw new Error('META_PAGE_ID no está configurado en .env');
+    }
+
+    const url = `${GRAPH_API_BASE}/${pageId}/feed`;
+    const payload = new URLSearchParams({
+      message: String(content || '').trim(),
+      access_token: token,
+    });
+
+    const safeImageUrl = String(imageUrl || '').trim();
+    if (safeImageUrl) {
+      payload.set('link', safeImageUrl);
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: payload,
+    });
+
+    const data = await response.json();
+    if (!response.ok || !data.id) {
+      throw new Error(data.error?.message || 'No se pudo publicar en Facebook.');
+    }
+
+    return data.id;
+  } catch (error) {
+    console.error('[ERROR SOCIAL] publishToFacebook:', error.message);
+    throw error;
+  }
+}
+
+async function publishByPlatform(platform, content, hashtags, imageUrl) {
+  try {
+    const normalizedPlatform = validateSocialPlatform(platform);
+    if (!normalizedPlatform) {
+      throw new Error('Plataforma inválida. Usa instagram, facebook o both.');
+    }
+
+    const caption = buildSocialCaption(content, hashtags);
+    const result = { ig_post_id: null, fb_post_id: null };
+
+    if (normalizedPlatform === 'instagram' || normalizedPlatform === 'both') {
+      result.ig_post_id = await publishToInstagram(caption, imageUrl);
+    }
+
+    if (normalizedPlatform === 'facebook' || normalizedPlatform === 'both') {
+      result.fb_post_id = await publishToFacebook(caption, imageUrl);
+    }
+
+    return result;
+  } catch (error) {
+    console.error('[ERROR SOCIAL] publishByPlatform:', error.message);
+    throw error;
+  }
+}
+
+async function executeScheduledPost(postId) {
+  try {
+    const { rows } = await pool.query('SELECT * FROM social_posts WHERE id = $1 LIMIT 1', [postId]);
+    if (rows.length === 0) {
+      return;
+    }
+
+    const post = rows[0];
+    if (post.status !== 'scheduled') {
+      return;
+    }
+
+    const publication = await publishByPlatform(
+      post.platform,
+      post.content,
+      post.hashtags || '',
+      post.image_url || ''
+    );
+
+    await pool.query(
+      `UPDATE social_posts
+       SET status = 'published',
+           ig_post_id = $1,
+           fb_post_id = $2,
+           published_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3`,
+      [publication.ig_post_id, publication.fb_post_id, post.id]
+    );
+  } catch (error) {
+    console.error('[ERROR SOCIAL] executeScheduledPost:', error.message);
+    await pool.query(
+      `UPDATE social_posts
+       SET status = 'failed', updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [postId]
+    );
+  } finally {
+    scheduledSocialTimeouts.delete(postId);
+  }
+}
+
+async function schedulePost(businessId, platform, content, hashtags, scheduledAt, imageUrl) {
+  try {
+    const safeBusinessId = String(businessId || 'demo').trim() || 'demo';
+    const normalizedPlatform = validateSocialPlatform(platform);
+    if (!normalizedPlatform) {
+      throw new Error('Plataforma inválida. Usa instagram, facebook o both.');
+    }
+
+    const safeContent = String(content || '').trim();
+    if (!safeContent) {
+      throw new Error('El contenido es obligatorio para programar.');
+    }
+
+    const safeScheduledAt = new Date(scheduledAt);
+    if (Number.isNaN(safeScheduledAt.getTime())) {
+      throw new Error('scheduledAt no tiene un formato de fecha válido.');
+    }
+
+    const safeHashtags = formatHashtags(hashtags);
+    const safeImageUrl = String(imageUrl || '').trim();
+
+    const insertResult = await pool.query(
+      `INSERT INTO social_posts (
+        business_id,
+        platform,
+        content,
+        image_url,
+        hashtags,
+        scheduled_at,
+        status
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, 'scheduled')
+      RETURNING *`,
+      [
+        safeBusinessId,
+        normalizedPlatform,
+        safeContent,
+        safeImageUrl || null,
+        safeHashtags || null,
+        safeScheduledAt.toISOString(),
+      ]
+    );
+
+    const post = insertResult.rows[0];
+    const delay = safeScheduledAt.getTime() - Date.now();
+
+    const timeoutId = setTimeout(() => {
+      void executeScheduledPost(post.id);
+    }, Math.max(delay, 0));
+
+    scheduledSocialTimeouts.set(post.id, timeoutId);
+
+    return post;
+  } catch (error) {
+    console.error('[ERROR SOCIAL] schedulePost:', error.message);
+    throw error;
+  }
+}
+
+// ----------------------------------------------------------------------------
 // INTEGRACIÓN CON WHATSAPP (Meta API)
 // ----------------------------------------------------------------------------
 
@@ -959,6 +1285,168 @@ app.post('/api/config/:businessId', async (req, res) => {
   } catch (error) {
     console.error('[ERROR API] /api/config/:businessId (POST):', error.message);
     return res.status(500).json({ error: 'No se pudo actualizar la configuración del negocio.' });
+  }
+});
+
+// ----------------------------------------------------------------------------
+// ENDPOINTS REST — SOCIAL (Instagram + Facebook)
+// ----------------------------------------------------------------------------
+
+app.post('/api/social/generate', async (req, res) => {
+  try {
+    const { topic, tone, businessId } = req.body;
+
+    if (!topic || typeof topic !== 'string') {
+      return res.status(400).json({ error: 'El campo topic es obligatorio.' });
+    }
+
+    const generated = await generatePostContent(businessId || 'demo', topic, tone || 'Profesional');
+    const preview = buildSocialCaption(generated.content, generated.hashtags);
+
+    return res.status(200).json({
+      content: generated.content,
+      hashtags: generated.hashtags,
+      preview,
+    });
+  } catch (error) {
+    console.error('[ERROR API] /api/social/generate:', error.message);
+    return res.status(500).json({ error: 'No se pudo generar el contenido social.' });
+  }
+});
+
+app.post('/api/social/publish', async (req, res) => {
+  try {
+    const { content, hashtags, platform, imageUrl, businessId } = req.body;
+    const normalizedPlatform = validateSocialPlatform(platform);
+
+    if (!normalizedPlatform) {
+      return res.status(400).json({ error: 'Plataforma inválida. Usa instagram, facebook o both.' });
+    }
+    if (!content || typeof content !== 'string') {
+      return res.status(400).json({ error: 'El campo content es obligatorio.' });
+    }
+
+    const safeHashtags = formatHashtags(hashtags);
+    const publication = await publishByPlatform(normalizedPlatform, content, safeHashtags, imageUrl);
+
+    await pool.query(
+      `INSERT INTO social_posts (
+        business_id,
+        platform,
+        content,
+        image_url,
+        hashtags,
+        status,
+        published_at,
+        ig_post_id,
+        fb_post_id
+      )
+      VALUES ($1, $2, $3, $4, $5, 'published', CURRENT_TIMESTAMP, $6, $7)`,
+      [
+        String(businessId || 'demo').trim() || 'demo',
+        normalizedPlatform,
+        String(content).trim(),
+        String(imageUrl || '').trim() || null,
+        safeHashtags || null,
+        publication.ig_post_id,
+        publication.fb_post_id,
+      ]
+    );
+
+    return res.status(200).json({
+      success: true,
+      ig_post_id: publication.ig_post_id,
+      fb_post_id: publication.fb_post_id,
+    });
+  } catch (error) {
+    console.error('[ERROR API] /api/social/publish:', error.message);
+    return res.status(500).json({ error: 'No se pudo publicar el contenido social.' });
+  }
+});
+
+app.post('/api/social/schedule', async (req, res) => {
+  try {
+    const { content, hashtags, platform, imageUrl, scheduledAt, businessId } = req.body;
+    if (!content || typeof content !== 'string') {
+      return res.status(400).json({ error: 'El campo content es obligatorio.' });
+    }
+    if (!scheduledAt || typeof scheduledAt !== 'string') {
+      return res.status(400).json({ error: 'El campo scheduledAt es obligatorio.' });
+    }
+
+    const post = await schedulePost(
+      businessId || 'demo',
+      platform,
+      content,
+      hashtags,
+      scheduledAt,
+      imageUrl
+    );
+
+    return res.status(200).json({
+      success: true,
+      post_id: post.id,
+      scheduledAt: post.scheduled_at,
+    });
+  } catch (error) {
+    console.error('[ERROR API] /api/social/schedule:', error.message);
+    return res.status(500).json({ error: 'No se pudo programar la publicación.' });
+  }
+});
+
+app.get('/api/social/posts', async (req, res) => {
+  try {
+    const businessId = String(req.query.businessId || 'demo').trim() || 'demo';
+    const status = String(req.query.status || 'all').trim().toLowerCase();
+
+    let query = `
+      SELECT id, business_id, platform, content, image_url, hashtags, scheduled_at,
+             published_at, status, ig_post_id, fb_post_id, created_at, updated_at
+      FROM social_posts
+      WHERE business_id = $1
+    `;
+    const values = [businessId];
+
+    if (status !== 'all') {
+      query += ' AND status = $2';
+      values.push(status);
+    }
+
+    query += ' ORDER BY created_at DESC';
+
+    const { rows } = await pool.query(query, values);
+    return res.status(200).json(rows);
+  } catch (error) {
+    console.error('[ERROR API] /api/social/posts:', error.message);
+    return res.status(500).json({ error: 'No se pudo obtener el historial de publicaciones.' });
+  }
+});
+
+app.delete('/api/social/posts/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rows } = await pool.query('SELECT id, status FROM social_posts WHERE id = $1 LIMIT 1', [id]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Publicación no encontrada.' });
+    }
+
+    const post = rows[0];
+    if (post.status === 'published') {
+      return res.status(400).json({ error: 'No se puede eliminar una publicación ya publicada.' });
+    }
+
+    const timeoutId = scheduledSocialTimeouts.get(post.id);
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      scheduledSocialTimeouts.delete(post.id);
+    }
+
+    await pool.query('DELETE FROM social_posts WHERE id = $1', [id]);
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    console.error('[ERROR API] /api/social/posts/:id (DELETE):', error.message);
+    return res.status(500).json({ error: 'No se pudo eliminar la publicación.' });
   }
 });
 

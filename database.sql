@@ -57,6 +57,32 @@ CREATE TABLE IF NOT EXISTS business_config (
 CREATE INDEX IF NOT EXISTS idx_business_config_business_id
     ON business_config(business_id);
 
+-- ============================================================================
+-- TABLA: social_posts
+-- Publicaciones de redes sociales (draft/scheduled/published/failed)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS social_posts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    business_id VARCHAR(50) DEFAULT 'demo',
+    platform VARCHAR(20) NOT NULL, -- 'instagram', 'facebook', 'both'
+    content TEXT NOT NULL,
+    image_url TEXT,
+    hashtags TEXT,
+    scheduled_at TIMESTAMP,
+    published_at TIMESTAMP,
+    status VARCHAR(20) DEFAULT 'draft', -- draft, scheduled, published, failed
+    ig_post_id VARCHAR(100),
+    fb_post_id VARCHAR(100),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_social_posts_business_created
+    ON social_posts(business_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_social_posts_status
+    ON social_posts(status);
+
 INSERT INTO business_config (
     business_id,
     name,
