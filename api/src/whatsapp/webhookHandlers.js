@@ -106,8 +106,31 @@ async function handleSlotSelection(convId, from, businessId, context, userMessag
 /**
  * Maneja los estados generales: NEW_LEAD y QUALIFYING.
  */
+function normalizeSpanishText(text) {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function isNewBusinessQuestion(userMessage) {
+  if (!userMessage) return false;
+  if (userMessage.includes('?') || userMessage.includes('¿')) return true;
+
+  const normalizedMessage = normalizeSpanishText(userMessage);
+  const questionKeywords = ['que', 'cuanto', 'como', 'cual', 'tienen', 'ofrecen', 'precio', 'costo', 'informacion'];
+
+  return questionKeywords.some((keyword) => {
+    const keywordRegex = new RegExp(`\\b${keyword}\\b`, 'i');
+    return keywordRegex.test(normalizedMessage);
+  });
+}
+
 async function handleGeneralState(convId, from, businessId, currentState, userMessage) {
-  const systemPrompt = await buildSystemPrompt(businessId, currentState);
+  const promptState = currentState === 'BOOKED' && isNewBusinessQuestion(userMessage)
+    ? 'QUALIFYING'
+    : currentState;
+  const systemPrompt = await buildSystemPrompt(businessId, promptState);
 
   console.log('🧠 Consultando a Groq llama-3.3-70b-versatile...');
   let aiResponse = await callAI(systemPrompt, userMessage);

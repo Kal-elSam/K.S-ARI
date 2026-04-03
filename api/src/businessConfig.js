@@ -1,81 +1,49 @@
 const { pool } = require('./core/db');
 
-/**
- * Construye el system prompt dinámico usando toda la configuración del negocio.
- * Se consulta DB en cada mensaje para reflejar cambios del panel inmediatamente.
- */
-function formatServiceForPrompt(service) {
-  if (!service || typeof service !== 'object') {
-    return 'Servicio';
-  }
-  const name = service.name || 'Servicio';
-  const price = service.price;
-  const currency = service.currency === 'USD' ? 'USD' : 'MXN';
-  const isQuotePrice = price === null || price === undefined;
-
-  if (!service.price_type) {
-    if (isQuotePrice) {
-      return `${name} (precio por cotización)`;
-    }
-    const safePrice = price ?? 'N/A';
-    return `${name} ($${safePrice} ${currency}, ${service.duration ?? 'N/A'} min)`;
-  }
-
-  const priceTypeLabels = {
-    one_time: 'pago único',
-    monthly: 'renta mensual',
-    annual: 'renta anual',
-    per_session: 'por sesión',
-  };
-  const pt = service.price_type;
-  const tipoLabel = priceTypeLabels[pt] || pt;
-  const parts = [name];
-  if (service.description) {
-    parts.push(`(${String(service.description)})`);
-  }
-
-  if (isQuotePrice) {
-    parts.push('(precio por cotización)');
-  } else {
-    parts.push(`— ${tipoLabel}: $${price} ${currency}`);
-  }
-
-  if ((pt === 'monthly' || pt === 'annual') && service.setup_fee != null && service.setup_fee !== '') {
-    const sf = Number(service.setup_fee);
-    if (!Number.isNaN(sf)) {
-      parts.push(`setup/inscripción: $${sf} ${currency}`);
-    }
-  }
-
-  if (pt === 'per_session' && service.duration != null && service.duration !== '') {
-    const mins = Number(service.duration);
-    if (!Number.isNaN(mins)) {
-      parts.push(`${mins} min`);
-    }
-  }
-
-  return parts.join(' ');
-}
-
 async function buildSystemPrompt(businessId, state) {
   const config = await getBusinessConfig(businessId);
   const safeServices = Array.isArray(config.services) ? config.services : [];
-  const serviciosTexto = safeServices.length
-    ? safeServices.map((service) => formatServiceForPrompt(service)).join('; ')
-    : 'Sin servicios configurados';
+  const serviciosDetalle = safeServices
+    .map((service) => {
+      if (!service || typeof service !== 'object') {
+        return '• Servicio';
+      }
+
+      let linea = `• ${service.name || 'Servicio'}`;
+      if (service.description) linea += `: ${service.description}`;
+      if (service.price && service.price_type) {
+        const tipos = {
+          monthly: '/mes',
+          one_time: 'pago único',
+          per_session: 'por sesión',
+          annual: '/año',
+        };
+        linea += ` — $${service.price} ${service.currency || 'MXN'} ${tipos[service.price_type] || ''}`;
+        if (service.setup_fee) linea += ` (setup inicial: $${service.setup_fee} ${service.currency || 'MXN'})`;
+      } else if (service.price_label) {
+        linea += ` — ${service.price_label}`;
+      }
+      return linea;
+    })
+    .join('\n');
 
   const base = `Eres ARI, asistente virtual de ${config.name}.
-${config.slogan ? `Slogan del negocio: "${config.slogan}".` : ''}
-Servicios disponibles: ${serviciosTexto}.
-Horario de atención: ${config.start_hour}:00 a ${config.end_hour}:00 hrs.
-Tono de comunicación: ${config.tone}.
-${config.active_announcement ? `⚠️ Anuncio importante: ${config.active_announcement}` : ''}
+${config.slogan ? `Slogan: "${config.slogan}"` : ''}
 
-Reglas importantes:
+CONOCIMIENTO DEL NEGOCIO (responde con esta info cuando te pregunten):
+Servicios y precios:
+${serviciosDetalle || 'Sin servicios configurados'}
+Horario: ${config.start_hour}:00 a ${config.end_hour}:00 hrs, de lunes a viernes.
+Tono: ${config.tone}.
+${config.active_announcement ? `Promoción activa: ${config.active_announcement}` : ''}
+
+REGLAS IMPORTANTES:
 - Siempre responde en español
-- Sé conciso, máximo 3 oraciones por mensaje
-- Tu objetivo es agendar citas, no solo informar
-- Nunca inventes servicios o precios que no estén en tu lista`;
+- Si te preguntan por servicios, precios o información del negocio → responde con los datos de arriba
+- Si el cliente muestra interés en contratar o agendar → enfócate en agendar
+- Máximo 3 oraciones por mensaje
+- Nunca inventes información que no esté en este prompt
+- Si no sabes algo → di "Para más información puedes contactarnos directamente"`;
 
   const statePrompts = {
     NEW_LEAD: `${base}
@@ -149,7 +117,6 @@ async function getBusinessConfig(businessId) {
 }
 
 module.exports = {
-  formatServiceForPrompt,
   buildSystemPrompt,
   getDefaultBusinessConfig,
   getBusinessConfig,
