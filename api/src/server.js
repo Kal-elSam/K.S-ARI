@@ -32,7 +32,7 @@ const ENV_VARS_REQUERIDAS = [
   'GOOGLE_CLIENT_ID',
   'GOOGLE_CLIENT_SECRET',
   'GOOGLE_REDIRECT_URI',
-  'META_SOCIAL_TOKEN',
+  'META_PAGE_ACCESS_TOKEN',
   'META_IG_ACCOUNT_ID',
   'META_PAGE_ID',
 ];
@@ -688,14 +688,6 @@ function buildSocialCaption(content, hashtags) {
   return `${safeContent}\n\n${safeHashtags}`;
 }
 
-function getSocialToken() {
-  const token = process.env.META_SOCIAL_TOKEN;
-  if (!token) {
-    throw new Error('META_SOCIAL_TOKEN no está configurado en .env');
-  }
-  return token;
-}
-
 async function generatePostContent(businessId, topic, tone) {
   try {
     const safeBusinessId = String(businessId || 'demo').trim() || 'demo';
@@ -751,7 +743,10 @@ Tono: ${safeTone}
 
 async function publishToInstagram(content, imageUrl) {
   try {
-    const token = getSocialToken();
+    const pageAccessToken = process.env.META_PAGE_ACCESS_TOKEN;
+    if (!pageAccessToken) {
+      throw new Error('META_PAGE_ACCESS_TOKEN no está configurado en .env');
+    }
     const igAccountId = process.env.META_IG_ACCOUNT_ID;
 
     if (!igAccountId) {
@@ -765,11 +760,13 @@ async function publishToInstagram(content, imageUrl) {
 
     const createResponse = await fetch(mediaUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Bearer ${pageAccessToken}`,
+      },
       body: new URLSearchParams({
         image_url: safeImageUrl,
         caption,
-        access_token: token,
       }),
     });
 
@@ -780,10 +777,12 @@ async function publishToInstagram(content, imageUrl) {
 
     const publishResponse = await fetch(publishUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Bearer ${pageAccessToken}`,
+      },
       body: new URLSearchParams({
         creation_id: createData.id,
-        access_token: token,
       }),
     });
 
@@ -801,7 +800,10 @@ async function publishToInstagram(content, imageUrl) {
 
 async function publishToFacebook(content, imageUrl) {
   try {
-    const token = getSocialToken();
+    const pageAccessToken = process.env.META_PAGE_ACCESS_TOKEN;
+    if (!pageAccessToken) {
+      throw new Error('META_PAGE_ACCESS_TOKEN no está configurado en .env');
+    }
     const pageId = process.env.META_PAGE_ID;
 
     if (!pageId) {
@@ -811,7 +813,6 @@ async function publishToFacebook(content, imageUrl) {
     const url = `${GRAPH_API_BASE}/${pageId}/feed`;
     const payload = new URLSearchParams({
       message: String(content || '').trim(),
-      access_token: token,
     });
 
     const safeImageUrl = String(imageUrl || '').trim();
@@ -821,7 +822,10 @@ async function publishToFacebook(content, imageUrl) {
 
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Bearer ${pageAccessToken}`,
+      },
       body: payload,
     });
 
