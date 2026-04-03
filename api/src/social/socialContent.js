@@ -22,6 +22,77 @@ function unsplashQueryFromTopicKeywords(safeTopic) {
   return null;
 }
 
+/**
+ * El modelo a menudo inserta saltos de línea reales dentro de "content", lo que rompe JSON.parse.
+ * Escapa \\n solo dentro de strings (entre comillas no escapadas).
+ */
+function escapeNewlinesInsideJsonStrings(jsonStr) {
+  const s = typeof jsonStr === 'string' ? jsonStr : '';
+  let out = '';
+  let inString = false;
+  let escapeNext = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (escapeNext) {
+      out += ch;
+      escapeNext = false;
+      continue;
+    }
+    if (ch === '\\') {
+      out += ch;
+      escapeNext = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      out += ch;
+      continue;
+    }
+    if (inString && (ch === '\n' || ch === '\r')) {
+      if (ch === '\r' && s[i + 1] === '\n') {
+        i++;
+      }
+      out += '\\n';
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+function stripMarkdownJsonFence(text) {
+  let s = String(text || '').trim();
+  s = s.replace(/^```(?:json)?\s*/i, '');
+  s = s.replace(/\s*```$/i, '');
+  return s.trim();
+}
+
+function extractJsonObject(text) {
+  const s = stripMarkdownJsonFence(text);
+  const start = s.indexOf('{');
+  const end = s.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) {
+    return null;
+  }
+  return s.slice(start, end + 1);
+}
+
+function parseSocialJsonFromAi(aiRaw) {
+  const block = extractJsonObject(aiRaw);
+  if (!block) {
+    return null;
+  }
+  try {
+    return JSON.parse(block);
+  } catch {
+    try {
+      return JSON.parse(escapeNewlinesInsideJsonStrings(block));
+    } catch {
+      return null;
+    }
+  }
+}
+
 async function generatePostContent(businessId, topic, tone) {
   try {
     const safeBusinessId = String(businessId || 'demo').trim() || 'demo';
@@ -38,9 +109,10 @@ async function generatePostContent(businessId, topic, tone) {
 Genera copy para Instagram y Facebook en español mexicano.
 Debes responder SOLO JSON válido con esta forma exacta:
 {"content":"...","hashtags":["#uno","#dos","#tres","#cuatro","#cinco"]}
+CRÍTICO: el JSON debe ser parseable. Dentro de "content" NO escribas saltos de línea reales; usa el escape \\n (barra invertida + n) para separar párrafos.
 Reglas:
 - content máximo 150 palabras
-- el texto debe tener párrafos cortos separados por saltos de línea; máximo 3 párrafos; cada párrafo máximo 2 oraciones
+- el texto debe tener párrafos cortos separados por \\n; máximo 3 párrafos; cada párrafo máximo 2 oraciones
 - incluir emojis adecuados al tono solicitado
 - hashtags exactamente 5, relevantes y en español cuando aplique
 - no agregues texto fuera del JSON`;
@@ -55,13 +127,12 @@ Tono: ${safeTone}
 `;
 
     const aiRaw = await callAI(systemPrompt, userPrompt);
-    const cleaned = String(aiRaw || '').trim();
 
-    const extractedJson =
-      cleaned.match(/\{[\s\S]*\}/)?.[0] ||
-      '{"content":"No se pudo generar contenido.","hashtags":["#ari","#negocio","#mexico","#marketing","#social"]}';
-
-    const parsed = JSON.parse(extractedJson);
+    const parsed =
+      parseSocialJsonFromAi(aiRaw) || {
+        content: 'No se pudo generar contenido.',
+        hashtags: ['#ari', '#negocio', '#mexico', '#marketing', '#social'],
+      };
     const content = String(parsed.content || '').trim();
     const hashtags = formatHashtags(parsed.hashtags);
 
