@@ -12,7 +12,12 @@ function createApp() {
   app.use(express.json());
   app.use(
     cors({
-      origin: ['http://localhost:3001', 'https://k-s-ari.vercel.app'],
+      origin: [
+        'http://localhost:3001',
+        'https://k-s-ari.vercel.app',
+        'https://kairosystems.dev',
+        'https://www.kairosystems.dev',
+      ],
     })
   );
 
