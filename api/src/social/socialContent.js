@@ -4,22 +4,110 @@ const { getBusinessConfig } = require('../businessConfig');
 const {
   VALID_IMAGE_SOURCES,
   SOCIAL_PLACEHOLDER_IMAGE_URL,
-  UNSPLASH_TECH_BUSINESS_COLLECTION_IDS,
+  UNSPLASH_OPTIONAL_COLLECTION_IDS,
 } = require('./socialConstants');
 const { formatHashtags, doesTopicMatch } = require('./socialHelpers');
 
+function pickOwnImageForTopic(rows, topic) {
+  const safeTopic = String(topic || '').trim().toLowerCase();
+  if (!safeTopic || rows.length === 0) {
+    return rows[0];
+  }
+  const exact = rows.find((image) => doesTopicMatch(topic, image.topic_tags));
+  if (exact) {
+    return exact;
+  }
+  let best = rows[0];
+  let bestScore = 0;
+  for (const image of rows) {
+    const tags = Array.isArray(image.topic_tags) ? image.topic_tags : [];
+    let score = 0;
+    for (const tag of tags) {
+      const g = String(tag || '').trim().toLowerCase();
+      if (!g) {
+        continue;
+      }
+      if (safeTopic.includes(g) || g.includes(safeTopic)) {
+        score += 2;
+      }
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      best = image;
+    }
+  }
+  return best;
+}
+
+function summarizeServicesForImageContext(services) {
+  if (!Array.isArray(services) || services.length === 0) {
+    return 'none';
+  }
+  const names = services
+    .slice(0, 6)
+    .map((s) => (s && typeof s === 'object' && s.name ? String(s.name).trim() : ''))
+    .filter(Boolean);
+  return names.length ? names.join(', ') : 'none';
+}
+
 /**
- * Consultas fijas más alineadas al tema (evita resultados genéricos tipo banca).
+ * Una sola frase en inglés alineada al sector (tipo de negocio) + tema del post.
  */
-function unsplashQueryFromTopicKeywords(safeTopic) {
-  const t = String(safeTopic || '').toLowerCase();
-  if (/software|tecnolog(í|i)a|digital|automatizaci(ó|o)n|whatsapp/.test(t)) {
-    return 'technology business laptop workspace';
+async function buildContextualUnsplashQuery(businessId, topic) {
+  const safeId = String(businessId || 'demo').trim() || 'demo';
+  const safeTopic = String(topic || '').trim();
+  const config = await getBusinessConfig(safeId);
+  const serviceHint = summarizeServicesForImageContext(config.services);
+
+  try {
+    const systemPrompt = `You output exactly one line: a concise English search phrase (4 to 8 words) for stock photography on Unsplash.
+The phrase must reflect BOTH the business sector/type AND the social post topic. Be literal (e.g. dental clinic, barbershop, restaurant interior) when the business implies a concrete setting.
+No brand names you were not given. No quotes, no JSON, no explanation—only the phrase.`;
+
+    const userPrompt = `Business name: ${config.name}
+Business type (internal code, may be Spanish): ${config.type}
+Slogan: ${config.slogan || 'none'}
+Services or products (short list): ${serviceHint}
+Social post topic (may be Spanish): ${safeTopic || 'promotion or tip for customers'}`;
+
+    const raw = await callAI(systemPrompt, userPrompt);
+    const cleaned = String(raw || '')
+      .trim()
+      .replace(/^["'`]|["'`]$/g, '')
+      .split('\n')[0]
+      .trim();
+    if (cleaned.length >= 4) {
+      return { query: cleaned, businessLabel: config.name };
+    }
+  } catch (err) {
+    console.error('[ERROR SOCIAL] Consulta Unsplash (IA contextual):', err.message);
   }
-  if (/servicios|planes|precio/.test(t)) {
-    return 'business meeting professional';
+
+  let fallback = `${safeTopic} ${config.type}`.replace(/\s+/g, ' ').trim();
+  if (fallback.length >= 4) {
+    try {
+      const userPrompt = `Translate this to a short English stock photo search phrase (max 6 words), only the phrase: ${fallback}`;
+      const translated = await callAI(
+        'You only output the translation requested, nothing else.',
+        userPrompt
+      );
+      const t = String(translated || '')
+        .trim()
+        .replace(/^["']|["']$/g, '')
+        .split('\n')[0]
+        .trim();
+      if (t.length >= 3) {
+        fallback = t;
+      }
+    } catch {
+      /* keep fallback as Spanish/type mix */
+    }
   }
-  return null;
+
+  return {
+    query: fallback.slice(0, 120).trim() || 'professional small business service',
+    businessLabel: config.name,
+  };
 }
 
 /**
@@ -163,8 +251,7 @@ async function getImageForPost(businessId, topic, imageSource) {
       );
 
       if (ownImagesResult.rows.length > 0) {
-        const exactMatch = ownImagesResult.rows.find((image) => doesTopicMatch(safeTopic, image.topic_tags));
-        const selected = exactMatch || ownImagesResult.rows[0];
+        const selected = pickOwnImageForTopic(ownImagesResult.rows, safeTopic);
         const selectedUrl = String(selected.url || '').trim();
         if (selectedUrl) {
           return selectedUrl;
@@ -175,40 +262,23 @@ async function getImageForPost(businessId, topic, imageSource) {
     if (safeImageSource === 'unsplash' || safeImageSource === 'auto') {
       const unsplashKey = String(process.env.UNSPLASH_ACCESS_KEY || '').trim();
       if (unsplashKey) {
-        let queryEN = safeTopic || 'modern business teamwork';
-        const keywordQuery = unsplashQueryFromTopicKeywords(safeTopic);
-        if (keywordQuery) {
-          queryEN = keywordQuery;
-        } else {
-          try {
-            const userPrompt = `Translate this topic to a 2-3 word English search query for stock photos. Respond with ONLY the translation, nothing else: ${safeTopic}`;
-            const translated = await callAI(
-              'You only output the translation requested by the user, nothing else.',
-              userPrompt
-            );
-            const cleaned = String(translated || '')
-              .trim()
-              .replace(/^["']|["']$/g, '')
-              .split('\n')[0]
-              .trim();
-            if (cleaned) {
-              queryEN = cleaned;
-            }
-          } catch (translateError) {
-            console.error('[ERROR SOCIAL] Traducción Unsplash omitida:', translateError.message);
-          }
-        }
+        const { query: queryEN, businessLabel } = await buildContextualUnsplashQuery(
+          safeBusinessId,
+          safeTopic
+        );
 
-        console.log(`[UNSPLASH] Buscando imagen para topic: "${safeTopic}" → query en inglés: "${queryEN}"`);
+        console.log(
+          `[UNSPLASH] Negocio: "${businessLabel}" | topic: "${safeTopic}" → query: "${queryEN}"`
+        );
 
         const url = new URL('https://api.unsplash.com/search/photos');
         url.searchParams.set('query', queryEN);
         url.searchParams.set('orientation', 'landscape');
         url.searchParams.set('content_filter', 'high');
-        url.searchParams.set('per_page', '10');
-        url.searchParams.set('page', String(Math.floor(Math.random() * 3) + 1));
-        if (UNSPLASH_TECH_BUSINESS_COLLECTION_IDS) {
-          url.searchParams.set('collections', UNSPLASH_TECH_BUSINESS_COLLECTION_IDS);
+        url.searchParams.set('per_page', '12');
+        url.searchParams.set('page', '1');
+        if (UNSPLASH_OPTIONAL_COLLECTION_IDS) {
+          url.searchParams.set('collections', UNSPLASH_OPTIONAL_COLLECTION_IDS);
         }
 
         const response = await fetch(url.toString(), {
@@ -220,15 +290,14 @@ async function getImageForPost(businessId, topic, imageSource) {
         const results = Array.isArray(data.results) ? data.results : [];
 
         if (response.ok && results.length > 0) {
-          const randomIndex = Math.floor(Math.random() * Math.min(results.length, 5));
-          const pick = results[randomIndex];
-          const width = typeof pick?.width === 'number' ? pick.width : 1080;
-          if (width < 400) {
-            return SOCIAL_PLACEHOLDER_IMAGE_URL;
-          }
-          const imageUrl = String(pick?.urls?.regular || '').trim();
-          if (imageUrl) {
-            return imageUrl;
+          const limit = Math.min(results.length, 10);
+          for (let i = 0; i < limit; i++) {
+            const pick = results[i];
+            const width = typeof pick?.width === 'number' ? pick.width : 1080;
+            const imageUrl = String(pick?.urls?.regular || '').trim();
+            if (width >= 400 && imageUrl) {
+              return imageUrl;
+            }
           }
         }
       }

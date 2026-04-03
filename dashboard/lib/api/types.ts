@@ -101,6 +101,10 @@ export interface GenerateSocialPostResponse {
   preview: string;
 }
 
+export interface SocialPreviewImageResponse {
+  imageUrl: string;
+}
+
 export interface PublishSocialPostPayload {
   content: string;
   hashtags: string;

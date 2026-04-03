@@ -8,6 +8,7 @@ import {
   generateSocialPost,
   getSocialImages,
   getSocialPosts,
+  getSocialPreviewImage,
   getSocialScheduleConfig,
   publishSocialNow,
   type SocialPost,
@@ -66,6 +67,8 @@ export default function SocialPage() {
   const [isSavingSchedule, setIsSavingSchedule] = useState<boolean>(false);
   const [isTogglingSchedule, setIsTogglingSchedule] = useState<boolean>(false);
   const [isAddingImage, setIsAddingImage] = useState<boolean>(false);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [isLoadingPreviewImage, setIsLoadingPreviewImage] = useState<boolean>(false);
 
   const preview = useSocialPreview(content, hashtags);
   const nextPostLabel = useNextPostLabel(schedule, nextPostOverride);
@@ -119,6 +122,22 @@ export default function SocialPage() {
     void loadImages();
   }, []);
 
+  const loadPreviewImage = async () => {
+    const trimmedTopic = topic.trim();
+    if (!trimmedTopic) {
+      return;
+    }
+    setIsLoadingPreviewImage(true);
+    try {
+      const { imageUrl } = await getSocialPreviewImage({ topic: trimmedTopic, businessId: "demo" });
+      setPreviewImageUrl(imageUrl?.trim() || null);
+    } catch {
+      setPreviewImageUrl(null);
+    } finally {
+      setIsLoadingPreviewImage(false);
+    }
+  };
+
   const handleGenerate = async () => {
     try {
       setError("");
@@ -131,6 +150,7 @@ export default function SocialPage() {
       });
       setContent(generated.content);
       setHashtags(generated.hashtags);
+      await loadPreviewImage();
     } catch {
       setError("No se pudo generar contenido con IA.");
     } finally {
@@ -149,6 +169,7 @@ export default function SocialPage() {
         tone,
         platforms: schedule.platforms,
         ...(content.trim() ? { content, hashtags } : {}),
+        ...(previewImageUrl?.trim() ? { imageUrl: previewImageUrl.trim() } : {}),
       });
       await loadPosts();
       setSuccess("Publicación enviada con éxito.");
@@ -327,6 +348,33 @@ export default function SocialPage() {
           <div className="rounded-2xl border border-white/10 bg-[#0d0f14] p-4">
             <p className="text-xs uppercase tracking-wider text-slate-400">Preview</p>
             <div className="mt-3 whitespace-pre-wrap rounded-xl border border-white/10 bg-black/20 p-3 text-sm text-slate-100">{preview || "Aquí verás el preview del post generado."}</div>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-[#0d0f14] p-4">
+            <p className="text-xs uppercase tracking-wider text-slate-400">Vista previa de imagen</p>
+            {isLoadingPreviewImage ? (
+              <div className="mt-3 flex aspect-square max-w-sm items-center justify-center rounded-xl border border-white/10 bg-black/20">
+                <span className="h-8 w-8 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+              </div>
+            ) : previewImageUrl ? (
+              <div className="mt-3 space-y-3">
+                <div className="mx-auto aspect-square max-h-80 w-full max-w-sm overflow-hidden rounded-xl border border-white/10 bg-black/40">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- URL Unsplash dinámica, object-fit cuadrado */}
+                  <img src={previewImageUrl} alt="" className="h-full w-full object-cover" />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void loadPreviewImage();
+                  }}
+                  disabled={isLoadingPreviewImage || !topic.trim()}
+                  className="rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-slate-200 hover:bg-white/10 disabled:opacity-50"
+                >
+                  🔄 Cambiar imagen
+                </button>
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-slate-500">Genera con IA para ver una imagen acorde al tema.</p>
+            )}
           </div>
         </article>
       ) : null}

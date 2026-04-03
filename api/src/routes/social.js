@@ -5,6 +5,27 @@ const social = require('../social/socialService');
  * @param {import('express').Express} app
  */
 function registerSocialRoutes(app) {
+  app.get('/api/social/preview-image', async (req, res) => {
+    try {
+      const topic = String(req.query.topic || '').trim();
+      const businessId = String(req.query.businessId || 'demo').trim() || 'demo';
+      if (!topic) {
+        return res.status(400).json({ error: 'El parámetro topic es obligatorio.' });
+      }
+
+      const schedule = await social.getSocialScheduleConfig(businessId);
+      const imageSource = social.VALID_IMAGE_SOURCES.has(schedule.image_source)
+        ? schedule.image_source
+        : 'auto';
+      const imageUrl = await social.getImageForPost(businessId, topic, imageSource);
+
+      return res.status(200).json({ imageUrl });
+    } catch (error) {
+      console.error('[ERROR API] /api/social/preview-image:', error.message);
+      return res.status(500).json({ error: 'No se pudo obtener la imagen de vista previa.' });
+    }
+  });
+
   app.post('/api/social/generate', async (req, res) => {
     try {
       const { topic, tone, businessId } = req.body;

@@ -11,6 +11,7 @@ import type {
   ScheduleSocialPostResponse,
   SocialImage,
   SocialPost,
+  SocialPreviewImageResponse,
   SocialScheduleConfig,
   ToggleSocialSchedulePayload,
   ToggleSocialScheduleResponse,
@@ -24,6 +25,17 @@ export function generateSocialPost(
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function getSocialPreviewImage(params: {
+  topic: string;
+  businessId: string;
+}): Promise<SocialPreviewImageResponse> {
+  const qs = new URLSearchParams({
+    topic: params.topic,
+    businessId: params.businessId,
+  });
+  return fetchAPI<SocialPreviewImageResponse>(`/api/social/preview-image?${qs.toString()}`);
 }
 
 export function publishSocialPost(payload: PublishSocialPostPayload): Promise<PublishSocialPostResponse> {
