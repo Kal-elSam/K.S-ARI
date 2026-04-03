@@ -50,8 +50,23 @@ function summarizeServicesForImageContext(services) {
   return names.length ? names.join(', ') : 'none';
 }
 
+function buildStockPhotoTopicUserPrompt(topic) {
+  const t = String(topic || '').trim() || 'business promotion';
+  return `Convert this topic to a 2-4 word English search query 
+optimized for stock photo search. Focus on visual concepts, 
+not abstract ideas. Examples:
+- 'ARI agente de reservas' → 'business appointment booking'
+- 'automatización WhatsApp' → 'smartphone business chat'
+- 'servicios Kairo Systems' → 'technology office workspace'
+- 'corte de cabello' → 'barbershop haircut style'
+- 'tips salud bucal' → 'dental care teeth'
+
+Topic: ${t}
+Respond with ONLY the search query, nothing else.`;
+}
+
 /**
- * Una sola frase en inglés alineada al sector (tipo de negocio) + tema del post.
+ * Frase en inglés para Unsplash: contexto de negocio + tema con enfoque visual (stock).
  */
 async function buildContextualUnsplashQuery(businessId, topic) {
   const safeId = String(businessId || 'demo').trim() || 'demo';
@@ -59,16 +74,17 @@ async function buildContextualUnsplashQuery(businessId, topic) {
   const config = await getBusinessConfig(safeId);
   const serviceHint = summarizeServicesForImageContext(config.services);
 
-  try {
-    const systemPrompt = `You output exactly one line: a concise English search phrase (4 to 8 words) for stock photography on Unsplash.
-The phrase must reflect BOTH the business sector/type AND the social post topic. Be literal (e.g. dental clinic, barbershop, restaurant interior) when the business implies a concrete setting.
-No brand names you were not given. No quotes, no JSON, no explanation—only the phrase.`;
+  const systemPrompt =
+    'You follow the user instructions exactly. Output a single line: the English search phrase only. No quotes, no explanation.';
 
-    const userPrompt = `Business name: ${config.name}
-Business type (internal code, may be Spanish): ${config.type}
+  try {
+    const userPrompt = `Use this business context only if it helps pick a concrete visual scene (do not invent brand names):
+Business name: ${config.name}
+Business type: ${config.type}
 Slogan: ${config.slogan || 'none'}
-Services or products (short list): ${serviceHint}
-Social post topic (may be Spanish): ${safeTopic || 'promotion or tip for customers'}`;
+Services hint: ${serviceHint}
+
+${buildStockPhotoTopicUserPrompt(safeTopic || 'promotion or tip for customers')}`;
 
     const raw = await callAI(systemPrompt, userPrompt);
     const cleaned = String(raw || '')
@@ -76,7 +92,7 @@ Social post topic (may be Spanish): ${safeTopic || 'promotion or tip for custome
       .replace(/^["'`]|["'`]$/g, '')
       .split('\n')[0]
       .trim();
-    if (cleaned.length >= 4) {
+    if (cleaned.length >= 3) {
       return { query: cleaned, businessLabel: config.name };
     }
   } catch (err) {
@@ -84,13 +100,10 @@ Social post topic (may be Spanish): ${safeTopic || 'promotion or tip for custome
   }
 
   let fallback = `${safeTopic} ${config.type}`.replace(/\s+/g, ' ').trim();
-  if (fallback.length >= 4) {
+  if (fallback.length >= 3) {
     try {
-      const userPrompt = `Translate this to a short English stock photo search phrase (max 6 words), only the phrase: ${fallback}`;
-      const translated = await callAI(
-        'You only output the translation requested, nothing else.',
-        userPrompt
-      );
+      const userPrompt = buildStockPhotoTopicUserPrompt(fallback);
+      const translated = await callAI(systemPrompt, userPrompt);
       const t = String(translated || '')
         .trim()
         .replace(/^["']|["']$/g, '')
