@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { getConfig, updateConfig, type BusinessConfig } from "@/lib/api";
+import { notifyBusinessConfigUpdated } from "@/lib/business-config-updated";
 import { defaultAccentColor, initialServiceItems } from "./settings-constants";
 import {
   apiToneToUI,
@@ -182,6 +183,7 @@ export function useSettingsForm() {
       await updateConfig("demo", payload);
       setLastPersistedConfig(payload);
       setSaveStatus("success");
+      notifyBusinessConfigUpdated();
       resetSaveStatusLater();
     } catch (error) {
       setSaveStatus("error");
@@ -204,6 +206,7 @@ export function useSettingsForm() {
       await updateConfig("demo", payload);
       setLastPersistedConfig(payload);
       setSaveStatus("success");
+      notifyBusinessConfigUpdated();
       resetSaveStatusLater();
     } catch (error) {
       setSaveStatus("error");

@@ -1,4 +1,5 @@
 import { NavLink } from "./nav-link";
+import { DashboardBusinessTitle } from "./dashboard-business-title";
 import type { ReactNode } from "react";
 
 interface DashboardLayoutProps {
@@ -33,7 +34,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           <header className="sticky top-0 z-20 flex items-center justify-between border-b border-white/10 bg-ari-bg/90 px-4 py-4 backdrop-blur md:px-6">
             <div>
               <p className="text-xs text-slate-400">Negocio</p>
-              <p className="text-base font-semibold text-white md:text-lg">Clínica ARI Demo</p>
+              <DashboardBusinessTitle />
             </div>
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-300 md:text-sm">
               <span className="h-2 w-2 rounded-full bg-emerald-400" />
