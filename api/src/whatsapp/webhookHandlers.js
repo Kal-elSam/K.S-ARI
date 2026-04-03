@@ -171,14 +171,66 @@ Mensaje del usuario: ${userMessage}`;
   );
 }
 
+function normalizeSlotIntentResponse(rawResponse) {
+  if (!rawResponse) return 'UNCLEAR';
+  const upper = String(rawResponse).trim().toUpperCase();
+  const match = upper.match(/\b(SLOT_[1-3]|REJECT|UNCLEAR)\b/);
+  return match ? match[1] : 'UNCLEAR';
+}
+
 /**
- * Procesa la selección de horario del cliente (1, 2 o 3).
+ * Procesa la selección de horario del cliente (1, 2 o 3) con detección de intención por IA.
  */
 async function handleSlotSelection(convId, from, businessId, context, userMessage) {
-  const seleccion = parseInt(userMessage, 10);
   const slotsOfrecidos = context.slotsOfrecidos || [];
+  if (slotsOfrecidos.length === 0) {
+    await sendWhatsAppMessage(
+      from,
+      'Por favor elige primero un día para tu cita y te muestro los horarios disponibles.'
+    );
+    return;
+  }
 
-  if (!seleccion || seleccion < 1 || seleccion > slotsOfrecidos.length) {
+  const slotsFormateados = slotsOfrecidos
+    .map((slot, index) => `${index + 1}. ${formatSlotForUser(slot.start)}`)
+    .join('\n');
+
+  const systemPrompt = `El usuario está viendo estas opciones de horario:
+${slotsFormateados}
+
+¿Qué quiere el usuario? Responde SOLO una de estas palabras:
+SLOT_1 → eligió el primer horario (dice '1', 'primero', 'el primero', '10am', etc)
+SLOT_2 → eligió el segundo horario
+SLOT_3 → eligió el tercer horario
+REJECT → no le quedan bien, quiere otro día, otra hora, cambiar
+         (dice: 'no', 'ninguno', 'otro día', 'mejor otro',
+          'no me queda', 'cambiar', 'diferente', 'no puedo')
+UNCLEAR → no se entiende su respuesta
+
+Mensaje del usuario: ${userMessage}`;
+
+  let intent;
+  try {
+    const aiResponse = await callAI(systemPrompt, 'OK', { temperature: 0 });
+    intent = normalizeSlotIntentResponse(aiResponse);
+  } catch {
+    await sendWhatsAppMessage(
+      from,
+      'Tuve un problema al leer tu respuesta. ¿Puedes decirme 1, 2 o 3, u otro día si prefieres?'
+    );
+    return;
+  }
+
+  if (intent === 'REJECT') {
+    await updateConversationContext(convId, {
+      slotsOfrecidos: [],
+      esperandoDia: true,
+    });
+    await sendWhatsAppMessage(from, 'Sin problema 😊 ¿Qué otro día te queda mejor?');
+    return;
+  }
+
+  if (intent === 'UNCLEAR') {
     await sendWhatsAppMessage(
       from,
       'Por favor responde con el número de tu horario preferido:\n1, 2 o 3. 😊'
@@ -186,7 +238,16 @@ async function handleSlotSelection(convId, from, businessId, context, userMessag
     return;
   }
 
-  const slotElegido = slotsOfrecidos[seleccion - 1];
+  const slotIndex = intent === 'SLOT_1' ? 0 : intent === 'SLOT_2' ? 1 : 2;
+  if (slotIndex >= slotsOfrecidos.length) {
+    await sendWhatsAppMessage(
+      from,
+      'Esa opción no está disponible. Por favor elige 1, 2 o 3 según los horarios que te mostré. 😊'
+    );
+    return;
+  }
+
+  const slotElegido = slotsOfrecidos[slotIndex];
   const fechaReserva = context.fechaReserva;
   const serviceName = context.servicio || 'Consulta';
 
