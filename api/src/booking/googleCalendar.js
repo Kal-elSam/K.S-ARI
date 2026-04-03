@@ -1,6 +1,7 @@
 const { pool } = require('../core/db');
 const { TIMEZONE } = require('../core/constants');
 const { sendWhatsAppMessage } = require('../whatsapp/whatsapp');
+const { addCalendarDays, formatDateISOYYYYMMDD, parseISODateToUTCNoon } = require('./bookingHelpers');
 
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_CALENDAR_BASE = 'https://www.googleapis.com/calendar/v3';
@@ -135,6 +136,30 @@ async function getAvailableSlots(businessId, date) {
     console.error('[ERROR CALENDAR] getAvailableSlots:', error.message);
     throw error;
   }
+}
+
+/**
+ * Busca el siguiente día con disponibilidad en un rango máximo de 14 días.
+ * Empieza desde el día siguiente a `fromISODate`.
+ */
+async function findNextAvailableDay(businessId, fromISODate) {
+  const baseDate = parseISODateToUTCNoon(fromISODate);
+  if (Number.isNaN(baseDate.getTime())) {
+    throw new Error('Fecha inválida para buscar disponibilidad.');
+  }
+
+  for (let dayOffset = 1; dayOffset <= 14; dayOffset += 1) {
+    const candidateDate = addCalendarDays(baseDate, dayOffset);
+    const slots = await getAvailableSlots(businessId, candidateDate);
+    if (slots.length > 0) {
+      return {
+        fecha: formatDateISOYYYYMMDD(candidateDate),
+        slots,
+      };
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -278,6 +303,7 @@ module.exports = {
   GOOGLE_CALENDAR_BASE,
   getValidAccessToken,
   getAvailableSlots,
+  findNextAvailableDay,
   createCalendarEvent,
   confirmCalendarEvent,
   sendReminder,

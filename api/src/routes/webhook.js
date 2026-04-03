@@ -1,11 +1,7 @@
 const { getOrCreateConversation } = require('../whatsapp/conversation');
 const { sendWhatsAppMessage } = require('../whatsapp/whatsapp');
-const {
-  handleReadyToBook,
-  handleDaySelection,
-  handleSlotSelection,
-  handleGeneralState,
-} = require('../whatsapp/webhookHandlers');
+const { getBusinessConfig } = require('../businessConfig');
+const { handleBookingFlow, handleGeneralState } = require('../whatsapp/webhookHandlers');
 
 /**
  * @param {import('express').Express} app
@@ -62,22 +58,13 @@ function registerWebhookRoutes(app) {
             const { id: convId, state: currentState, context, business_id: businessId } = conversation;
             console.log(`⚙️  Estado actual: ${currentState}`);
 
-            if (currentState === 'READY_TO_BOOK' && context?.esperandoDia) {
-              await handleDaySelection(convId, from, businessId, context, userMessage);
-              continue;
-            }
-
-            if (currentState === 'READY_TO_BOOK' && Array.isArray(context?.slotsOfrecidos) && context.slotsOfrecidos.length > 0) {
-              await handleSlotSelection(convId, from, businessId, context, userMessage);
-              continue;
-            }
-
             if (currentState === 'READY_TO_BOOK') {
-              await handleReadyToBook(convId, from, businessId, context);
+              const config = await getBusinessConfig(businessId);
+              await handleBookingFlow(convId, from, businessId, context, userMessage, config);
               continue;
             }
 
-            await handleGeneralState(convId, from, businessId, currentState, userMessage);
+            await handleGeneralState(convId, from, businessId, currentState, context, userMessage);
           } catch (internalError) {
             console.error('[CRÍTICO INTERNO] Fallo en procesamiento:', internalError.message);
             await sendWhatsAppMessage(from, 'En este momento no puedo procesar tu mensaje, intenta en unos minutos.');

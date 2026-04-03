@@ -1,8 +1,7 @@
 const { pool } = require('./core/db');
 
-async function buildSystemPrompt(businessId, state) {
-  const config = await getBusinessConfig(businessId);
-  const safeServices = Array.isArray(config.services) ? config.services : [];
+function buildServiciosTextoParaPrompt(services) {
+  const safeServices = Array.isArray(services) ? services : [];
   const serviciosDetalle = safeServices
     .map((service) => {
       if (!service || typeof service !== 'object') {
@@ -27,12 +26,19 @@ async function buildSystemPrompt(businessId, state) {
     })
     .join('\n');
 
+  return serviciosDetalle || 'Sin servicios configurados';
+}
+
+async function buildSystemPrompt(businessId, state) {
+  const config = await getBusinessConfig(businessId);
+  const serviciosDetalle = buildServiciosTextoParaPrompt(config.services);
+
   const base = `Eres ARI, asistente virtual de ${config.name}.
 ${config.slogan ? `Slogan: "${config.slogan}"` : ''}
 
 CONOCIMIENTO DEL NEGOCIO (responde con esta info cuando te pregunten):
 Servicios y precios:
-${serviciosDetalle || 'Sin servicios configurados'}
+${serviciosDetalle}
 Horario: ${config.start_hour}:00 a ${config.end_hour}:00 hrs, de lunes a viernes.
 Tono: ${config.tone}.
 ${config.active_announcement ? `Promoción activa: ${config.active_announcement}` : ''}
@@ -117,6 +123,7 @@ async function getBusinessConfig(businessId) {
 }
 
 module.exports = {
+  buildServiciosTextoParaPrompt,
   buildSystemPrompt,
   getDefaultBusinessConfig,
   getBusinessConfig,

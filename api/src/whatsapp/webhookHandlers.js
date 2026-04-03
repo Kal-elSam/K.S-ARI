@@ -1,289 +1,82 @@
-const {
-  getOrCreateConversation,
-  updateConversationState,
-  updateConversationContext,
-} = require('./conversation');
-const { buildSystemPrompt } = require('../businessConfig');
-const { callAI } = require('../groq');
+const { updateConversationState, updateConversationContext } = require('./conversation');
+const { buildSystemPrompt, buildServiciosTextoParaPrompt } = require('../businessConfig');
+const { callAIWithTools } = require('../groq');
 const { sendWhatsAppMessage } = require('./whatsapp');
 const {
   getAvailableSlots,
+  findNextAvailableDay,
   createCalendarEvent,
   confirmCalendarEvent,
 } = require('../booking/googleCalendar');
 const {
-  addCalendarDays,
   buildISOWithOffset,
   formatDateDDMMYYYY,
-  formatDateISOYYYYMMDD,
-  formatFechaTextoUsuario,
-  formatSlotForUser,
   getTodayInTimezone,
   parseISODateToUTCNoon,
 } = require('../booking/bookingHelpers');
 
-/**
- * Maneja la primera entrada al estado READY_TO_BOOK.
- * Pregunta qué día prefiere el cliente para su cita.
- */
-async function handleReadyToBook(convId, from, businessId, context) {
-  await updateConversationContext(convId, {
-    esperandoDia: true,
-  });
+const BOOKING_TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'check_availability',
+      description: 'Consulta los horarios disponibles en el calendario para una fecha específica',
+      parameters: {
+        type: 'object',
+        properties: {
+          date: {
+            type: 'string',
+            description: 'Fecha en formato YYYY-MM-DD',
+          },
+        },
+        required: ['date'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'book_appointment',
+      description: 'Agenda una cita en el calendario cuando el cliente confirmó fecha y hora',
+      parameters: {
+        type: 'object',
+        properties: {
+          date: {
+            type: 'string',
+            description: 'Fecha en formato YYYY-MM-DD',
+          },
+          time: {
+            type: 'string',
+            description: 'Hora en formato HH:MM',
+          },
+          service: {
+            type: 'string',
+            description: 'Nombre del servicio que el cliente quiere',
+          },
+        },
+        required: ['date', 'time', 'service'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'send_message',
+      description: 'Envía un mensaje al cliente',
+      parameters: {
+        type: 'object',
+        properties: {
+          message: {
+            type: 'string',
+            description: 'El mensaje a enviar',
+          },
+        },
+        required: ['message'],
+      },
+    },
+  },
+];
 
-  const mensaje = '¡Perfecto! ¿Qué día te queda mejor para tu cita?\nPuedes decirme el día de la semana o una fecha específica 📅';
-  await sendWhatsAppMessage(from, mensaje);
-}
-
-/**
- * Extrae y procesa el día elegido por el cliente en READY_TO_BOOK.
- */
-function normalizeDateExtractorResult(rawResponse) {
-  if (!rawResponse) return 'NO_DATE';
-
-  const cleanResponse = String(rawResponse).trim();
-  const lines = cleanResponse.split('\n').map((line) => line.trim()).filter(Boolean);
-  const tokens = ['NO_DATE', 'PAST_DATE'];
-
-  for (const line of lines) {
-    const upper = line.toUpperCase();
-    if (tokens.includes(upper)) return upper;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(line)) return line;
-  }
-
-  const directToken = cleanResponse.match(/\b(NO_DATE|PAST_DATE)\b/i);
-  if (directToken?.[1]) return directToken[1].toUpperCase();
-
-  const isoDate = cleanResponse.match(/\b\d{4}-\d{2}-\d{2}\b/);
-  if (isoDate?.[0]) return isoDate[0];
-
-  return 'NO_DATE';
-}
-
-async function handleDaySelection(convId, from, businessId, context, userMessage) {
-  const today = getTodayInTimezone();
-  const todayText = formatDateDDMMYYYY(today);
-  const todayISO = formatDateISOYYYYMMDD(today);
-  const systemPrompt = `Eres un extractor de fechas. Hoy es ${todayText}.
-El usuario quiere agendar una cita. Extrae qué día menciona.
-Responde SOLO con la fecha en formato YYYY-MM-DD.
-
-Reglas:
-- 'mañana' → fecha de mañana
-- 'pasado mañana' → fecha en 2 días
-- 'el lunes', 'el martes', etc → el próximo día de esa semana
-- 'esta semana' → mañana
-- 'la próxima semana' → el lunes de la próxima semana
-- 'en 15 días' → fecha en 15 días
-- Si no menciona fecha → responde exactamente: NO_DATE
-- Si la fecha es hoy o pasada → responde exactamente: PAST_DATE
-
-Mensaje del usuario: ${userMessage}`;
-
-  let extractedDate;
-  try {
-    const aiResponse = await callAI(systemPrompt, 'OK', { temperature: 0 });
-    extractedDate = normalizeDateExtractorResult(aiResponse);
-  } catch {
-    await sendWhatsAppMessage(from, 'Tuve un problema al entender la fecha. ¿Puedes decirme el día nuevamente?');
-    return;
-  }
-
-  if (extractedDate === 'NO_DATE') {
-    await sendWhatsAppMessage(
-      from,
-      "No entendí bien el día 😅 ¿Puedes decirme el día de la semana o una fecha? Por ejemplo: 'el jueves' o '15 de abril'"
-    );
-    return;
-  }
-
-  if (extractedDate === 'PAST_DATE' || extractedDate <= todayISO) {
-    await sendWhatsAppMessage(
-      from,
-      'Ese día ya pasó 😊 ¿Te refieres a la próxima semana? Dime el día y con gusto reviso'
-    );
-    return;
-  }
-
-  const requestedDate = parseISODateToUTCNoon(extractedDate);
-  let slots = [];
-  try {
-    slots = await getAvailableSlots(businessId, requestedDate);
-  } catch {
-    await sendWhatsAppMessage(from, 'Tuve un problema al consultar la disponibilidad. Por favor escríbenos de nuevo en un momento.');
-    return;
-  }
-
-  if (slots.length > 0) {
-    const slotsAMostrar = slots.slice(0, 3);
-    const emojis = ['1️⃣', '2️⃣', '3️⃣'];
-    const fechaTexto = formatFechaTextoUsuario(extractedDate);
-    const opciones = slotsAMostrar
-      .map((slot, index) => `${emojis[index]} ${formatSlotForUser(slot.start)}`)
-      .join('\n');
-
-    await updateConversationContext(convId, {
-      esperandoDia: false,
-      slotsOfrecidos: slotsAMostrar,
-      fechaReserva: extractedDate,
-      fechaTexto,
-    });
-
-    await sendWhatsAppMessage(from, `${fechaTexto} tengo disponible:\n${opciones}\n\n¿Cuál prefieres?`);
-    return;
-  }
-
-  for (let dayOffset = 1; dayOffset <= 14; dayOffset += 1) {
-    const nextDate = addCalendarDays(requestedDate, dayOffset);
-    const nextDateISO = formatDateISOYYYYMMDD(nextDate);
-    let nextSlots = [];
-    try {
-      nextSlots = await getAvailableSlots(businessId, nextDate);
-    } catch {
-      await sendWhatsAppMessage(from, 'Tuve un problema al consultar la disponibilidad. Por favor escríbenos de nuevo en un momento.');
-      return;
-    }
-
-    if (nextSlots.length === 0) continue;
-
-    const slotsAMostrar = nextSlots.slice(0, 3);
-    const fechaTexto = formatFechaTextoUsuario(nextDateISO);
-    const horariosTexto = slotsAMostrar.map((slot) => formatSlotForUser(slot.start)).join(', ');
-
-    await updateConversationContext(convId, {
-      esperandoDia: false,
-      slotsOfrecidos: slotsAMostrar,
-      fechaReserva: nextDateISO,
-      fechaTexto,
-    });
-
-    await sendWhatsAppMessage(
-      from,
-      `Ese día no tengo disponibilidad 😕\nEl próximo día disponible es ${fechaTexto}, con horarios a las ${horariosTexto}. ¿Te funciona?`
-    );
-    return;
-  }
-
-  await updateConversationContext(convId, { esperandoDia: true });
-  await sendWhatsAppMessage(
-    from,
-    'No encontré horarios disponibles en los próximos días 😕 ¿Quieres que revise otra fecha?'
-  );
-}
-
-function normalizeSlotIntentResponse(rawResponse) {
-  if (!rawResponse) return 'UNCLEAR';
-  const upper = String(rawResponse).trim().toUpperCase();
-  const match = upper.match(/\b(SLOT_[1-3]|REJECT|UNCLEAR)\b/);
-  return match ? match[1] : 'UNCLEAR';
-}
-
-/**
- * Procesa la selección de horario del cliente (1, 2 o 3) con detección de intención por IA.
- */
-async function handleSlotSelection(convId, from, businessId, context, userMessage) {
-  const slotsOfrecidos = context.slotsOfrecidos || [];
-  if (slotsOfrecidos.length === 0) {
-    await sendWhatsAppMessage(
-      from,
-      'Por favor elige primero un día para tu cita y te muestro los horarios disponibles.'
-    );
-    return;
-  }
-
-  const slotsFormateados = slotsOfrecidos
-    .map((slot, index) => `${index + 1}. ${formatSlotForUser(slot.start)}`)
-    .join('\n');
-
-  const systemPrompt = `El usuario está viendo estas opciones de horario:
-${slotsFormateados}
-
-¿Qué quiere el usuario? Responde SOLO una de estas palabras:
-SLOT_1 → eligió el primer horario (dice '1', 'primero', 'el primero', '10am', etc)
-SLOT_2 → eligió el segundo horario
-SLOT_3 → eligió el tercer horario
-REJECT → no le quedan bien, quiere otro día, otra hora, cambiar
-         (dice: 'no', 'ninguno', 'otro día', 'mejor otro',
-          'no me queda', 'cambiar', 'diferente', 'no puedo')
-UNCLEAR → no se entiende su respuesta
-
-Mensaje del usuario: ${userMessage}`;
-
-  let intent;
-  try {
-    const aiResponse = await callAI(systemPrompt, 'OK', { temperature: 0 });
-    intent = normalizeSlotIntentResponse(aiResponse);
-  } catch {
-    await sendWhatsAppMessage(
-      from,
-      'Tuve un problema al leer tu respuesta. ¿Puedes decirme 1, 2 o 3, u otro día si prefieres?'
-    );
-    return;
-  }
-
-  if (intent === 'REJECT') {
-    await updateConversationContext(convId, {
-      slotsOfrecidos: [],
-      esperandoDia: true,
-    });
-    await sendWhatsAppMessage(from, 'Sin problema 😊 ¿Qué otro día te queda mejor?');
-    return;
-  }
-
-  if (intent === 'UNCLEAR') {
-    await sendWhatsAppMessage(
-      from,
-      'Por favor responde con el número de tu horario preferido:\n1, 2 o 3. 😊'
-    );
-    return;
-  }
-
-  const slotIndex = intent === 'SLOT_1' ? 0 : intent === 'SLOT_2' ? 1 : 2;
-  if (slotIndex >= slotsOfrecidos.length) {
-    await sendWhatsAppMessage(
-      from,
-      'Esa opción no está disponible. Por favor elige 1, 2 o 3 según los horarios que te mostré. 😊'
-    );
-    return;
-  }
-
-  const slotElegido = slotsOfrecidos[slotIndex];
-  const fechaReserva = context.fechaReserva;
-  const serviceName = context.servicio || 'Consulta';
-
-  const startISO = buildISOWithOffset(fechaReserva, slotElegido.start);
-  const endISO = buildISOWithOffset(fechaReserva, slotElegido.end);
-
-  try {
-    const eventId = await createCalendarEvent(businessId, from, serviceName, startISO, endISO);
-
-    await confirmCalendarEvent(businessId, eventId, serviceName, from);
-
-    await updateConversationState(convId, 'BOOKED');
-    await updateConversationContext(convId, {
-      eventId,
-      horarioConfirmado: slotElegido.start,
-      esperandoDia: false,
-      slotsOfrecidos: [],
-    });
-
-    const horaFormateada = formatSlotForUser(slotElegido.start);
-    const fechaTexto = context.fechaTexto || formatFechaTextoUsuario(fechaReserva);
-    await sendWhatsAppMessage(
-      from,
-      `✅ Tu cita está agendada para ${fechaTexto} a las ${horaFormateada}. ¡Te esperamos!`
-    );
-  } catch {
-    await sendWhatsAppMessage(
-      from,
-      'Hubo un problema al agendar tu cita. Por favor intenta nuevamente.'
-    );
-  }
-}
-
-/**
- * Maneja los estados generales: NEW_LEAD y QUALIFYING.
- */
 function normalizeSpanishText(text) {
   return text
     .normalize('NFD')
@@ -297,38 +90,296 @@ function isNewBusinessQuestion(userMessage) {
 
   const normalizedMessage = normalizeSpanishText(userMessage);
   const questionKeywords = ['que', 'cuanto', 'como', 'cual', 'tienen', 'ofrecen', 'precio', 'costo', 'informacion'];
-
-  return questionKeywords.some((keyword) => {
-    const keywordRegex = new RegExp(`\\b${keyword}\\b`, 'i');
-    return keywordRegex.test(normalizedMessage);
-  });
+  return questionKeywords.some((keyword) => new RegExp(`\\b${keyword}\\b`, 'i').test(normalizedMessage));
 }
 
-async function handleGeneralState(convId, from, businessId, currentState, userMessage) {
-  const promptState = currentState === 'BOOKED' && isNewBusinessQuestion(userMessage)
-    ? 'QUALIFYING'
-    : currentState;
-  const systemPrompt = await buildSystemPrompt(businessId, promptState);
+function toPlainToolCall(toolCall) {
+  return {
+    id: toolCall.id,
+    type: toolCall.type,
+    function: {
+      name: toolCall.function?.name || '',
+      arguments: toolCall.function?.arguments || '{}',
+    },
+  };
+}
 
-  console.log('🧠 Consultando a Groq llama-3.3-70b-versatile...');
-  let aiResponse = await callAI(systemPrompt, userMessage);
+function normalizeHistoryMessage(message) {
+  if (!message || typeof message !== 'object') return null;
+  if (message.role === 'user') {
+    return {
+      role: 'user',
+      content: typeof message.content === 'string' ? message.content : '',
+    };
+  }
+  if (message.role === 'assistant') {
+    const normalized = {
+      role: 'assistant',
+      content: typeof message.content === 'string' ? message.content : '',
+    };
+    if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+      normalized.tool_calls = message.tool_calls.map(toPlainToolCall);
+    }
+    return normalized;
+  }
+  if (message.role === 'tool') {
+    return {
+      role: 'tool',
+      tool_call_id: typeof message.tool_call_id === 'string' ? message.tool_call_id : '',
+      content: typeof message.content === 'string' ? message.content : '',
+    };
+  }
+  return null;
+}
 
-  if (currentState === 'NEW_LEAD') {
-    console.log('🔄 Estado avanza: NEW_LEAD → QUALIFYING');
-    await updateConversationState(convId, 'QUALIFYING');
-  } else if (currentState === 'QUALIFYING' && aiResponse.includes('READY_TO_BOOK')) {
-    console.log('🔄 Estado avanza: QUALIFYING → READY_TO_BOOK');
-    aiResponse = aiResponse.replace('READY_TO_BOOK', '').trim();
-    await updateConversationState(convId, 'READY_TO_BOOK');
+function trimHistory(messages) {
+  return messages
+    .map(normalizeHistoryMessage)
+    .filter(Boolean)
+    .slice(-10);
+}
+
+function isValidISODate(date) {
+  return typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date);
+}
+
+function isValidHHMM(time) {
+  return typeof time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(time);
+}
+
+function buildBookingSystemPrompt(config) {
+  const serviciosTexto = buildServiciosTextoParaPrompt(config.services);
+  return `Eres ARI, asistente de ${config.name}.
+Ayudas a agendar citas de manera natural y conversacional.
+Hoy es ${formatDateDDMMYYYY(getTodayInTimezone())}.
+
+SERVICIOS:
+${serviciosTexto}
+HORARIO: ${config.start_hour}:00 a ${config.end_hour}:00 hrs
+
+INSTRUCCIONES:
+- Cuando el cliente quiera agendar, pregunta qué día le queda mejor
+- Usa check_availability para ver horarios reales antes de ofrecerlos
+- Cuando el cliente confirme fecha y hora, usa book_appointment
+- Si no hay disponibilidad un día, ofrece el siguiente disponible
+- Sé natural y conversacional, no uses listas numeradas innecesariamente
+- Si el cliente cambia de día, vuelve a consultar disponibilidad
+- Confirma la cita con fecha y hora exacta antes de agendar
+- Responde siempre en español
+- Nunca inventes horarios o servicios`;
+}
+
+function buildToolMessage(content, toolCallId) {
+  return {
+    role: 'tool',
+    tool_call_id: toolCallId,
+    content,
+  };
+}
+
+async function executeBookingTool(toolCall, toolArgs, executionContext) {
+  const { convId, from, businessId } = executionContext;
+  const toolName = toolCall.function?.name;
+
+  if (toolName === 'check_availability') {
+    if (!isValidISODate(toolArgs.date)) {
+      return 'Error: la fecha debe estar en formato YYYY-MM-DD.';
+    }
+
+    const targetDate = parseISODateToUTCNoon(toolArgs.date);
+    const slots = await getAvailableSlots(businessId, targetDate);
+    if (slots.length > 0) {
+      return `Slots disponibles el ${toolArgs.date}: ${slots.slice(0, 5).map((slot) => slot.start).join(', ')}`;
+    }
+
+    const nextDay = await findNextAvailableDay(businessId, toolArgs.date);
+    if (!nextDay) {
+      return 'Sin disponibilidad en los próximos 14 días.';
+    }
+
+    return `Sin disponibilidad el ${toolArgs.date}. Siguiente día disponible: ${nextDay.fecha} con slots: ${nextDay.slots.slice(0, 5).map((slot) => slot.start).join(', ')}`;
   }
 
-  console.log(`🤖 A: "${aiResponse}"`);
-  await sendWhatsAppMessage(from, aiResponse);
+  if (toolName === 'book_appointment') {
+    const { date, time, service } = toolArgs;
+    if (!isValidISODate(date)) {
+      return 'Error: la fecha debe estar en formato YYYY-MM-DD.';
+    }
+    if (!isValidHHMM(time)) {
+      return 'Error: la hora debe estar en formato HH:MM.';
+    }
+    if (!service || typeof service !== 'string') {
+      return 'Error: el servicio es obligatorio para agendar.';
+    }
+
+    const dayDate = parseISODateToUTCNoon(date);
+    const slots = await getAvailableSlots(businessId, dayDate);
+    const timeAvailable = slots.some((slot) => slot.start === time);
+    if (!timeAvailable) {
+      return `Error: el horario ${time} ya no está disponible para el ${date}.`;
+    }
+
+    const [hourPart, minutePart] = time.split(':').map(Number);
+    const endHour = (hourPart + 1) % 24;
+    const endTime = `${String(endHour).padStart(2, '0')}:${String(minutePart).padStart(2, '0')}`;
+    const startISO = buildISOWithOffset(date, time);
+    const endISO = buildISOWithOffset(date, endTime);
+
+    try {
+      const eventId = await createCalendarEvent(businessId, from, service, startISO, endISO);
+      await confirmCalendarEvent(businessId, eventId, service, from);
+
+      await updateConversationState(convId, 'BOOKED');
+      await updateConversationContext(convId, {
+        eventId,
+        horarioConfirmado: time,
+        fechaReserva: date,
+        esperandoDia: false,
+        slotsOfrecidos: [],
+        fechaTexto: '',
+        chatHistory: [],
+      });
+
+      executionContext.appointmentBooked = true;
+      return `Cita agendada exitosamente. EventId: ${eventId}`;
+    } catch (error) {
+      return `Error al agendar: ${error.message}`;
+    }
+  }
+
+  if (toolName === 'send_message') {
+    const message = typeof toolArgs.message === 'string' ? toolArgs.message.trim() : '';
+    if (!message) {
+      return 'Error: message es obligatorio para send_message.';
+    }
+    await sendWhatsAppMessage(from, message);
+    executionContext.sentViaTool = true;
+    executionContext.lastToolMessage = message;
+    return 'Mensaje enviado al cliente.';
+  }
+
+  return `Error: herramienta "${toolName}" no soportada.`;
+}
+
+async function handleBookingFlow(convId, from, businessId, context, userMessage, config) {
+  try {
+    const history = trimHistory(Array.isArray(context.chatHistory) ? context.chatHistory : []);
+    const baseMessages = [...history, { role: 'user', content: userMessage }];
+    const systemPrompt = buildBookingSystemPrompt(config);
+    const executionContext = {
+      convId,
+      from,
+      businessId,
+      sentViaTool: false,
+      lastToolMessage: '',
+      appointmentBooked: false,
+    };
+
+    let workingMessages = [...baseMessages];
+    let finalAssistantMessage = null;
+
+    for (let step = 0; step < 5; step += 1) {
+      const aiMessage = await callAIWithTools(systemPrompt, workingMessages, BOOKING_TOOLS, { temperature: 0.3 });
+      const hasToolCalls = Array.isArray(aiMessage.tool_calls) && aiMessage.tool_calls.length > 0;
+
+      if (!hasToolCalls) {
+        finalAssistantMessage = normalizeHistoryMessage({
+          role: 'assistant',
+          content: typeof aiMessage.content === 'string' ? aiMessage.content : '',
+        });
+        if (finalAssistantMessage) {
+          workingMessages.push(finalAssistantMessage);
+        }
+        break;
+      }
+
+      const assistantWithTools = normalizeHistoryMessage({
+        role: 'assistant',
+        content: typeof aiMessage.content === 'string' ? aiMessage.content : '',
+        tool_calls: aiMessage.tool_calls.map(toPlainToolCall),
+      });
+      if (assistantWithTools) {
+        workingMessages.push(assistantWithTools);
+      }
+
+      for (const toolCall of aiMessage.tool_calls) {
+        let args = {};
+        try {
+          args = JSON.parse(toolCall.function?.arguments || '{}');
+        } catch {
+          const invalidArgsMessage = buildToolMessage(
+            'Error: argumentos inválidos para la herramienta (JSON no parseable).',
+            toolCall.id
+          );
+          workingMessages.push(invalidArgsMessage);
+          continue;
+        }
+
+        let toolResult = '';
+        try {
+          toolResult = await executeBookingTool(toolCall, args, executionContext);
+        } catch (error) {
+          toolResult = `Error interno ejecutando herramienta: ${error.message}`;
+        }
+
+        workingMessages.push(buildToolMessage(toolResult, toolCall.id));
+      }
+    }
+
+    const finalText = finalAssistantMessage?.content || '';
+    if (!executionContext.sentViaTool && finalText.trim()) {
+      await sendWhatsAppMessage(from, finalText);
+    }
+
+    if (!executionContext.appointmentBooked) {
+      await updateConversationContext(convId, {
+        chatHistory: trimHistory(workingMessages),
+      });
+    }
+  } catch (error) {
+    console.error('[BOOKING FLOW] Error:', error.message);
+    await sendWhatsAppMessage(from, 'En este momento no pude procesar tu solicitud de agenda. Intenta nuevamente en un momento.');
+  }
+}
+
+async function handleGeneralState(convId, from, businessId, currentState, context, userMessage) {
+  try {
+    const promptState = currentState === 'BOOKED' && isNewBusinessQuestion(userMessage)
+      ? 'QUALIFYING'
+      : currentState;
+    const systemPrompt = await buildSystemPrompt(businessId, promptState);
+    const history = trimHistory(Array.isArray(context.chatHistory) ? context.chatHistory : []);
+    const messages = [...history, { role: 'user', content: userMessage }];
+
+    console.log('🧠 Consultando a Groq llama-3.3-70b-versatile...');
+    const aiMessage = await callAIWithTools(systemPrompt, messages, [], { temperature: 0.7 });
+    let aiResponse = typeof aiMessage.content === 'string' ? aiMessage.content : '';
+
+    if (currentState === 'NEW_LEAD') {
+      console.log('🔄 Estado avanza: NEW_LEAD → QUALIFYING');
+      await updateConversationState(convId, 'QUALIFYING');
+    } else if (currentState === 'QUALIFYING' && aiResponse.includes('READY_TO_BOOK')) {
+      console.log('🔄 Estado avanza: QUALIFYING → READY_TO_BOOK');
+      aiResponse = aiResponse.replace('READY_TO_BOOK', '').trim();
+      await updateConversationState(convId, 'READY_TO_BOOK');
+    }
+
+    const finalResponse = aiResponse || 'Claro, cuéntame un poco más para ayudarte mejor.';
+    const nextHistory = trimHistory([
+      ...messages,
+      { role: 'assistant', content: finalResponse },
+    ]);
+    await updateConversationContext(convId, { chatHistory: nextHistory });
+
+    console.log(`🤖 A: "${finalResponse}"`);
+    await sendWhatsAppMessage(from, finalResponse);
+  } catch (error) {
+    console.error('[GENERAL FLOW] Error:', error.message);
+    await sendWhatsAppMessage(from, 'En este momento no puedo procesar tu mensaje, intenta en unos minutos.');
+  }
 }
 
 module.exports = {
-  handleReadyToBook,
-  handleDaySelection,
-  handleSlotSelection,
+  handleBookingFlow,
   handleGeneralState,
 };
