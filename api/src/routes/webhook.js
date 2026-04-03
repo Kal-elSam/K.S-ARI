@@ -2,6 +2,7 @@ const { getOrCreateConversation } = require('../whatsapp/conversation');
 const { sendWhatsAppMessage } = require('../whatsapp/whatsapp');
 const {
   handleReadyToBook,
+  handleDaySelection,
   handleSlotSelection,
   handleGeneralState,
 } = require('../whatsapp/webhookHandlers');
@@ -61,13 +62,18 @@ function registerWebhookRoutes(app) {
             const { id: convId, state: currentState, context, business_id: businessId } = conversation;
             console.log(`⚙️  Estado actual: ${currentState}`);
 
-            if (currentState === 'READY_TO_BOOK' && !context?.slotsOfrecidos) {
-              await handleReadyToBook(convId, from, businessId, context);
+            if (currentState === 'READY_TO_BOOK' && context?.esperandoDia) {
+              await handleDaySelection(convId, from, businessId, context, userMessage);
               continue;
             }
 
-            if (currentState === 'READY_TO_BOOK' && context?.slotsOfrecidos) {
+            if (currentState === 'READY_TO_BOOK' && Array.isArray(context?.slotsOfrecidos) && context.slotsOfrecidos.length > 0) {
               await handleSlotSelection(convId, from, businessId, context, userMessage);
+              continue;
+            }
+
+            if (currentState === 'READY_TO_BOOK') {
+              await handleReadyToBook(convId, from, businessId, context);
               continue;
             }
 

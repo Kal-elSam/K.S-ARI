@@ -1,4 +1,3 @@
-const { TIMEZONE } = require('../core/constants');
 const {
   getOrCreateConversation,
   updateConversationState,
@@ -13,51 +12,163 @@ const {
   confirmCalendarEvent,
 } = require('../booking/googleCalendar');
 const {
-  getTomorrowInMexico,
+  addCalendarDays,
   buildISOWithOffset,
+  formatDateDDMMYYYY,
+  formatDateISOYYYYMMDD,
+  formatFechaTextoUsuario,
   formatSlotForUser,
+  getTodayInTimezone,
+  parseISODateToUTCNoon,
 } = require('../booking/bookingHelpers');
 
 /**
- * Maneja el estado READY_TO_BOOK la primera vez:
- * Obtiene slots disponibles para mañana y los presenta al cliente.
+ * Maneja la primera entrada al estado READY_TO_BOOK.
+ * Pregunta qué día prefiere el cliente para su cita.
  */
 async function handleReadyToBook(convId, from, businessId, context) {
-  const manana = getTomorrowInMexico();
-
-  const formatter = new Intl.DateTimeFormat('sv', {
-    timeZone: TIMEZONE,
-    year: 'numeric', month: '2-digit', day: '2-digit',
+  await updateConversationContext(convId, {
+    esperandoDia: true,
   });
-  const fechaManana = formatter.format(manana);
 
+  const mensaje = '¡Perfecto! ¿Qué día te queda mejor para tu cita?\nPuedes decirme el día de la semana o una fecha específica 📅';
+  await sendWhatsAppMessage(from, mensaje);
+}
+
+/**
+ * Extrae y procesa el día elegido por el cliente en READY_TO_BOOK.
+ */
+function normalizeDateExtractorResult(rawResponse) {
+  if (!rawResponse) return 'NO_DATE';
+
+  const cleanResponse = String(rawResponse).trim();
+  const lines = cleanResponse.split('\n').map((line) => line.trim()).filter(Boolean);
+  const tokens = ['NO_DATE', 'PAST_DATE'];
+
+  for (const line of lines) {
+    const upper = line.toUpperCase();
+    if (tokens.includes(upper)) return upper;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(line)) return line;
+  }
+
+  const directToken = cleanResponse.match(/\b(NO_DATE|PAST_DATE)\b/i);
+  if (directToken?.[1]) return directToken[1].toUpperCase();
+
+  const isoDate = cleanResponse.match(/\b\d{4}-\d{2}-\d{2}\b/);
+  if (isoDate?.[0]) return isoDate[0];
+
+  return 'NO_DATE';
+}
+
+async function handleDaySelection(convId, from, businessId, context, userMessage) {
+  const today = getTodayInTimezone();
+  const todayText = formatDateDDMMYYYY(today);
+  const todayISO = formatDateISOYYYYMMDD(today);
+  const systemPrompt = `Eres un extractor de fechas. Hoy es ${todayText}.
+El usuario quiere agendar una cita. Extrae qué día menciona.
+Responde SOLO con la fecha en formato YYYY-MM-DD.
+
+Reglas:
+- 'mañana' → fecha de mañana
+- 'pasado mañana' → fecha en 2 días
+- 'el lunes', 'el martes', etc → el próximo día de esa semana
+- 'esta semana' → mañana
+- 'la próxima semana' → el lunes de la próxima semana
+- 'en 15 días' → fecha en 15 días
+- Si no menciona fecha → responde exactamente: NO_DATE
+- Si la fecha es hoy o pasada → responde exactamente: PAST_DATE
+
+Mensaje del usuario: ${userMessage}`;
+
+  let extractedDate;
+  try {
+    const aiResponse = await callAI(systemPrompt, 'OK', { temperature: 0 });
+    extractedDate = normalizeDateExtractorResult(aiResponse);
+  } catch {
+    await sendWhatsAppMessage(from, 'Tuve un problema al entender la fecha. ¿Puedes decirme el día nuevamente?');
+    return;
+  }
+
+  if (extractedDate === 'NO_DATE') {
+    await sendWhatsAppMessage(
+      from,
+      "No entendí bien el día 😅 ¿Puedes decirme el día de la semana o una fecha? Por ejemplo: 'el jueves' o '15 de abril'"
+    );
+    return;
+  }
+
+  if (extractedDate === 'PAST_DATE' || extractedDate <= todayISO) {
+    await sendWhatsAppMessage(
+      from,
+      'Ese día ya pasó 😊 ¿Te refieres a la próxima semana? Dime el día y con gusto reviso'
+    );
+    return;
+  }
+
+  const requestedDate = parseISODateToUTCNoon(extractedDate);
   let slots = [];
   try {
-    slots = await getAvailableSlots(businessId, manana);
+    slots = await getAvailableSlots(businessId, requestedDate);
   } catch {
     await sendWhatsAppMessage(from, 'Tuve un problema al consultar la disponibilidad. Por favor escríbenos de nuevo en un momento.');
     return;
   }
 
-  if (slots.length === 0) {
-    await sendWhatsAppMessage(from, 'Lamentablemente no tenemos disponibilidad para mañana. ¿Te gustaría que revisara otro día?');
+  if (slots.length > 0) {
+    const slotsAMostrar = slots.slice(0, 3);
+    const emojis = ['1️⃣', '2️⃣', '3️⃣'];
+    const fechaTexto = formatFechaTextoUsuario(extractedDate);
+    const opciones = slotsAMostrar
+      .map((slot, index) => `${emojis[index]} ${formatSlotForUser(slot.start)}`)
+      .join('\n');
+
+    await updateConversationContext(convId, {
+      esperandoDia: false,
+      slotsOfrecidos: slotsAMostrar,
+      fechaReserva: extractedDate,
+      fechaTexto,
+    });
+
+    await sendWhatsAppMessage(from, `${fechaTexto} tengo disponible:\n${opciones}\n\n¿Cuál prefieres?`);
     return;
   }
 
-  const slotsAMostrar = slots.slice(0, 3);
+  for (let dayOffset = 1; dayOffset <= 14; dayOffset += 1) {
+    const nextDate = addCalendarDays(requestedDate, dayOffset);
+    const nextDateISO = formatDateISOYYYYMMDD(nextDate);
+    let nextSlots = [];
+    try {
+      nextSlots = await getAvailableSlots(businessId, nextDate);
+    } catch {
+      await sendWhatsAppMessage(from, 'Tuve un problema al consultar la disponibilidad. Por favor escríbenos de nuevo en un momento.');
+      return;
+    }
 
-  await updateConversationContext(convId, {
-    slotsOfrecidos: slotsAMostrar,
-    fechaReserva: fechaManana,
-  });
+    if (nextSlots.length === 0) continue;
 
-  const emojis = ['1️⃣', '2️⃣', '3️⃣'];
-  const opciones = slotsAMostrar
-    .map((slot, i) => `${emojis[i]} ${formatSlotForUser(slot.start)}`)
-    .join('\n');
+    const slotsAMostrar = nextSlots.slice(0, 3);
+    const fechaTexto = formatFechaTextoUsuario(nextDateISO);
+    const horariosTexto = slotsAMostrar.map((slot) => formatSlotForUser(slot.start)).join(', ');
 
-  const mensaje = `¡Perfecto! Tengo disponibilidad mañana:\n${opciones}\n\n¿Cuál prefieres?`;
-  await sendWhatsAppMessage(from, mensaje);
+    await updateConversationContext(convId, {
+      esperandoDia: false,
+      slotsOfrecidos: slotsAMostrar,
+      fechaReserva: nextDateISO,
+      fechaTexto,
+    });
+
+    await sendWhatsAppMessage(
+      from,
+      `Ese día no tengo disponibilidad 😕\nEl próximo día disponible es ${fechaTexto}, con horarios a las ${horariosTexto}. ¿Te funciona?`
+    );
+    return;
+  }
+
+  await updateConversationContext(convId, { esperandoDia: true });
+  await sendWhatsAppMessage(
+    from,
+    'No encontré horarios disponibles en los próximos días 😕 ¿Quieres que revise otra fecha?'
+  );
 }
 
 /**
@@ -88,12 +199,18 @@ async function handleSlotSelection(convId, from, businessId, context, userMessag
     await confirmCalendarEvent(businessId, eventId, serviceName, from);
 
     await updateConversationState(convId, 'BOOKED');
-    await updateConversationContext(convId, { eventId, horarioConfirmado: slotElegido.start });
+    await updateConversationContext(convId, {
+      eventId,
+      horarioConfirmado: slotElegido.start,
+      esperandoDia: false,
+      slotsOfrecidos: [],
+    });
 
     const horaFormateada = formatSlotForUser(slotElegido.start);
+    const fechaTexto = context.fechaTexto || formatFechaTextoUsuario(fechaReserva);
     await sendWhatsAppMessage(
       from,
-      `✅ Tu cita está agendada para mañana a las ${horaFormateada}. ¡Te esperamos!`
+      `✅ Tu cita está agendada para ${fechaTexto} a las ${horaFormateada}. ¡Te esperamos!`
     );
   } catch {
     await sendWhatsAppMessage(
@@ -150,6 +267,7 @@ async function handleGeneralState(convId, from, businessId, currentState, userMe
 
 module.exports = {
   handleReadyToBook,
+  handleDaySelection,
   handleSlotSelection,
   handleGeneralState,
 };

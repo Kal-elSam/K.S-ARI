@@ -1,7 +1,7 @@
 /**
  * Llama a la API de Groq con el sistema de prompts dinámico.
  */
-async function callAI(systemPrompt, userMessage) {
+async function callAI(systemPrompt, userMessage, options = {}) {
   const apiKey = process.env.GROQ_API_KEY;
 
   if (!apiKey) {
@@ -16,7 +16,7 @@ async function callAI(systemPrompt, userMessage) {
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userMessage },
     ],
-    temperature: 0.7,
+    temperature: typeof options.temperature === 'number' ? options.temperature : 0.7,
   };
 
   try {
