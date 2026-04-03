@@ -136,13 +136,13 @@ Tono: ${tone}`;
 
 async function publishToFacebook(content, imageUrl) {
   try {
-    if (!process.env.META_SOCIAL_TOKEN || !process.env.META_PAGE_ID) {
-      throw new Error('Faltan META_SOCIAL_TOKEN o META_PAGE_ID.');
+    if (!process.env.META_PAGE_ACCESS_TOKEN || !process.env.META_PAGE_ID) {
+      throw new Error('Faltan META_PAGE_ACCESS_TOKEN o META_PAGE_ID.');
     }
 
     const payload = new URLSearchParams({
       message: content,
-      access_token: process.env.META_SOCIAL_TOKEN,
+      access_token: process.env.META_PAGE_ACCESS_TOKEN,
     });
 
     if (imageUrl) {
@@ -169,8 +169,8 @@ async function publishToFacebook(content, imageUrl) {
 
 async function publishToInstagram(content, imageUrl) {
   try {
-    if (!process.env.META_SOCIAL_TOKEN || !process.env.META_IG_ACCOUNT_ID) {
-      throw new Error('Faltan META_SOCIAL_TOKEN o META_IG_ACCOUNT_ID.');
+    if (!process.env.META_PAGE_ACCESS_TOKEN || !process.env.META_IG_ACCOUNT_ID) {
+      throw new Error('Faltan META_PAGE_ACCESS_TOKEN o META_IG_ACCOUNT_ID.');
     }
 
     const createResponse = await fetch(
@@ -181,7 +181,7 @@ async function publishToInstagram(content, imageUrl) {
         body: new URLSearchParams({
           image_url: imageUrl || PLACEHOLDER_IMAGE_URL,
           caption: content,
-          access_token: process.env.META_SOCIAL_TOKEN,
+          access_token: process.env.META_PAGE_ACCESS_TOKEN,
         }),
       }
     );
@@ -191,6 +191,9 @@ async function publishToInstagram(content, imageUrl) {
       throw new Error(createData.error?.message || 'No se pudo crear el contenedor de Instagram.');
     }
 
+    // Instagram procesa el contenedor de forma asíncrona; sin espera suele fallar "Media ID is not available".
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+
     const publishResponse = await fetch(
       `${GRAPH_API_BASE}/${process.env.META_IG_ACCOUNT_ID}/media_publish`,
       {
@@ -198,7 +201,7 @@ async function publishToInstagram(content, imageUrl) {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
           creation_id: createData.id,
-          access_token: process.env.META_SOCIAL_TOKEN,
+          access_token: process.env.META_PAGE_ACCESS_TOKEN,
         }),
       }
     );

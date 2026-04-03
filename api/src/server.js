@@ -775,6 +775,9 @@ async function publishToInstagram(content, imageUrl) {
       throw new Error(createData.error?.message || 'No se pudo crear el contenedor de Instagram.');
     }
 
+    // Instagram procesa el contenedor de forma asíncrona; sin espera suele fallar "Media ID is not available".
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+
     const publishResponse = await fetch(publishUrl, {
       method: 'POST',
       headers: {
