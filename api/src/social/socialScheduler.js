@@ -62,20 +62,19 @@ async function startAutoPublisher(businessId) {
       const job = cron.schedule(
         expression,
         async () => {
+          const topic = getNextTopicForBusiness(safeBusinessId, topics);
+          console.log(`[CRON] Disparando publicación para ${safeBusinessId} - topic: ${topic}`);
           try {
-            const topic = getNextTopicForBusiness(safeBusinessId, topics);
-            const publication = await autoGenerateAndPublish(
+            const result = await autoGenerateAndPublish(
               safeBusinessId,
               topic,
               platforms,
               tone,
               imageSource
             );
-            console.log(
-              `[CRON] Publicación automática completada para ${safeBusinessId} (${new Date().toISOString()}) | topic="${topic}" | ig=${publication.ig_post_id || '-'} | fb=${publication.fb_post_id || '-'}`
-            );
-          } catch (error) {
-            console.error('[CRON] Error en publicación automática:', error.message);
+            console.log(`[CRON] ✅ Publicación exitosa:`, result);
+          } catch (err) {
+            console.error(`[CRON] ❌ Error al publicar:`, err.message);
           }
         },
         { timezone: TIMEZONE }

@@ -27,6 +27,7 @@ async function autoGenerateAndPublish(businessId, topic, platforms, tone, imageS
 
     let postContent;
     let postHashtags;
+    console.log('[AUTO] 1. Generando contenido...');
     if (preContent) {
       postContent = preContent;
       postHashtags = formatHashtags(opts.hashtags);
@@ -36,9 +37,11 @@ async function autoGenerateAndPublish(businessId, topic, platforms, tone, imageS
       postHashtags = generated.hashtags;
     }
 
+    console.log('[AUTO] 2. Obteniendo imagen...');
     const imageUrl = preImageUrl || (await getImageForPost(safeBusinessId, safeImageTopic, imageSource));
     const caption = buildSocialCaption(postContent, postHashtags);
 
+    console.log('[AUTO] 3. Publicando en plataformas...');
     let igPostId = null;
     let fbPostId = null;
 
@@ -56,6 +59,7 @@ async function autoGenerateAndPublish(businessId, topic, platforms, tone, imageS
         ? 'both'
         : safePlatforms[0];
 
+    console.log('[AUTO] 4. Guardando en DB...');
     await pool.query(
       `INSERT INTO social_posts (
         business_id,
@@ -87,6 +91,7 @@ async function autoGenerateAndPublish(businessId, topic, platforms, tone, imageS
       imageUrl,
     };
   } catch (error) {
+    console.error('[AUTO] ❌ Error en pipeline:', error.message);
     console.error('[ERROR SOCIAL] autoGenerateAndPublish:', error.message);
     throw error;
   }
