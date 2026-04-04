@@ -10,6 +10,8 @@ export interface BusinessInfoSectionProps {
   onCustomBusinessTypeChange: (value: string) => void;
   slogan: string;
   onSloganChange: (value: string) => void;
+  ownerPhone: string;
+  onOwnerPhoneChange: (value: string) => void;
   welcomeMessage: string;
   onWelcomeMessageChange: (value: string) => void;
   accentColor: string;
@@ -31,6 +33,8 @@ export function BusinessInfoSection({
   onCustomBusinessTypeChange,
   slogan,
   onSloganChange,
+  ownerPhone,
+  onOwnerPhoneChange,
   welcomeMessage,
   onWelcomeMessageChange,
   accentColor,
@@ -100,6 +104,19 @@ export function BusinessInfoSection({
             placeholder="Ej. El mejor corte de tu vida"
             className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-white outline-none focus:border-ari-accent"
           />
+        </label>
+        <label className="space-y-1 text-sm text-slate-300">
+          <span>Tu WhatsApp para notificaciones</span>
+          <input
+            type="tel"
+            value={ownerPhone}
+            onChange={(event) => onOwnerPhoneChange(event.target.value)}
+            placeholder="524427471950 (con código de país, sin +)"
+            className="w-full rounded-lg border border-white/10 bg-[#111217] px-3 py-2 text-white outline-none focus:border-ari-accent"
+          />
+          <small className="block text-xs text-slate-400">
+            ARI te avisará aquí cuando lleguen nuevas citas y podrás gestionar tu agenda desde WhatsApp.
+          </small>
         </label>
         <label className="space-y-1 text-sm text-slate-300">
           <span>Mensaje de bienvenida</span>

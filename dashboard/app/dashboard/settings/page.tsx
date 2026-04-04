@@ -40,6 +40,8 @@ export default function SettingsPage() {
         onCustomBusinessTypeChange={form.setCustomBusinessType}
         slogan={form.slogan}
         onSloganChange={form.setSlogan}
+        ownerPhone={form.ownerPhone}
+        onOwnerPhoneChange={form.setOwnerPhone}
         welcomeMessage={form.welcomeMessage}
         onWelcomeMessageChange={form.setWelcomeMessage}
         accentColor={form.accentColor}

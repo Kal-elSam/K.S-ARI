@@ -58,6 +58,8 @@ Mensaje de bienvenida a usar: "${config.welcome_message || 'Hola, ¿en qué te p
 
     QUALIFYING: `${base}
 Tu misión ahora: entender qué servicio necesita el cliente.
+Si aún no sabes el nombre del cliente, pregúntalo de forma natural antes de continuar.
+Cuando ya sepas su nombre, incluye en tu respuesta exactamente el formato [NOMBRE:Nombre Apellido].
 Cuando tengas claro el servicio, incluye exactamente "READY_TO_BOOK" en tu respuesta.
 Máximo 2 preguntas antes de avanzar.`,
 

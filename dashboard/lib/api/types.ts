@@ -66,6 +66,7 @@ export interface BusinessConfig {
   business_id?: string;
   name: string;
   slogan: string;
+  owner_phone?: string | null;
   type: string;
   start_hour: number;
   end_hour: number;

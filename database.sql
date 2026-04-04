@@ -5,6 +5,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TABLE IF NOT EXISTS conversations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     phone VARCHAR(20) NOT NULL UNIQUE,  -- Número de cliente único activo
+    client_name VARCHAR(100),
     state VARCHAR(50) NOT NULL,
     business_id VARCHAR(50) NOT NULL,
     context JSONB DEFAULT '{}'::jsonb,
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS business_config (
     business_id VARCHAR(100) NOT NULL UNIQUE,
     name VARCHAR(150) NOT NULL,
     slogan VARCHAR(200),
+    owner_phone VARCHAR(20),
     type VARCHAR(80) NOT NULL,
     start_hour INT NOT NULL,
     end_hour INT NOT NULL,
@@ -59,12 +61,14 @@ CREATE INDEX IF NOT EXISTS idx_business_config_business_id
 
 -- Tablas antiguas (p. ej. Railway): columnas faltantes. Ver database/migrations/001_upgrade_legacy_business_config.sql
 ALTER TABLE business_config ADD COLUMN IF NOT EXISTS slogan VARCHAR(200);
+ALTER TABLE business_config ADD COLUMN IF NOT EXISTS owner_phone VARCHAR(20);
 ALTER TABLE business_config ADD COLUMN IF NOT EXISTS tone VARCHAR(80) NOT NULL DEFAULT 'amigable';
 ALTER TABLE business_config ADD COLUMN IF NOT EXISTS welcome_message TEXT;
 ALTER TABLE business_config ADD COLUMN IF NOT EXISTS active_announcement TEXT;
 ALTER TABLE business_config ADD COLUMN IF NOT EXISTS services JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE business_config ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
 ALTER TABLE business_config ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS client_name VARCHAR(100);
 
 -- ============================================================================
 -- TABLA: social_posts
@@ -133,6 +137,7 @@ INSERT INTO business_config (
     business_id,
     name,
     slogan,
+    owner_phone,
     type,
     start_hour,
     end_hour,
@@ -145,6 +150,7 @@ VALUES (
     'demo',
     'Clínica ARI Demo',
     'Tu estilo, nuestra precisión',
+    '524427471950',
     'consultorio',
     9,
     18,
@@ -160,6 +166,7 @@ ON CONFLICT (business_id) DO UPDATE
 SET
     name = EXCLUDED.name,
     slogan = EXCLUDED.slogan,
+    owner_phone = EXCLUDED.owner_phone,
     type = EXCLUDED.type,
     start_hour = EXCLUDED.start_hour,
     end_hour = EXCLUDED.end_hour,

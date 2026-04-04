@@ -35,6 +35,7 @@ function normalizeBusinessConfigPayload(body, businessIdParam) {
   const businessId = sliceStr(businessIdParam, 100);
   const name = sliceStr(body?.name, 150) || 'Sin nombre';
   const slogan = sliceStr(body?.slogan, 200);
+  const owner_phone = sliceStr(body?.owner_phone, 20);
   const type = sliceStr(body?.type, 80) || 'consultorio';
   const start_hour = clampHour(body?.start_hour);
   const end_hour = clampHour(body?.end_hour);
@@ -50,6 +51,7 @@ function normalizeBusinessConfigPayload(body, businessIdParam) {
     businessId,
     name,
     slogan,
+    owner_phone,
     type,
     start_hour,
     end_hour,

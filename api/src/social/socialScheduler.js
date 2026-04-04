@@ -20,6 +20,15 @@ const {
 const { getSocialScheduleConfig } = require('./socialScheduleConfig');
 const { publishByPlatform } = require('./socialGraphApi');
 const { autoGenerateAndPublish } = require('./socialAutoPublish');
+const {
+  sendTomorrowRemindersForBusiness,
+  sendDailySummaryToOwner,
+} = require('../features/appointments/services/appointmentNotificationService');
+
+const appointmentCronJobs = {
+  reminderJob: null,
+  summaryJob: null,
+};
 
 async function stopAutoPublisher(businessId) {
   try {
@@ -108,10 +117,67 @@ async function initActiveSchedules() {
       await startAutoPublisher(row.business_id);
     }
 
+    await startAppointmentSchedulers();
     console.log(`[CRON] Schedules activos inicializados: ${rows.length}`);
   } catch (error) {
     console.error('[ERROR SOCIAL] initActiveSchedules:', error.message);
     throw error;
+  }
+}
+
+async function runForBusinessesWithOwnerPhone(executor) {
+  try {
+    const { rows } = await pool.query(
+      `SELECT business_id
+       FROM business_config
+       WHERE owner_phone IS NOT NULL
+         AND owner_phone <> ''`
+    );
+
+    for (const row of rows) {
+      try {
+        await executor(row.business_id);
+      } catch (error) {
+        console.error('[CRON APPOINTMENTS] Error por negocio:', error.message);
+      }
+    }
+  } catch (error) {
+    console.error('[CRON APPOINTMENTS] Error consultando negocios:', error.message);
+  }
+}
+
+function stopAppointmentSchedulers() {
+  if (appointmentCronJobs.reminderJob) {
+    appointmentCronJobs.reminderJob.stop();
+    appointmentCronJobs.reminderJob = null;
+  }
+  if (appointmentCronJobs.summaryJob) {
+    appointmentCronJobs.summaryJob.stop();
+    appointmentCronJobs.summaryJob = null;
+  }
+}
+
+async function startAppointmentSchedulers() {
+  try {
+    stopAppointmentSchedulers();
+
+    appointmentCronJobs.reminderJob = cron.schedule(
+      '0 18 * * *',
+      async () => {
+        await runForBusinessesWithOwnerPhone(sendTomorrowRemindersForBusiness);
+      },
+      { timezone: TIMEZONE }
+    );
+
+    appointmentCronJobs.summaryJob = cron.schedule(
+      '0 8 * * *',
+      async () => {
+        await runForBusinessesWithOwnerPhone(sendDailySummaryToOwner);
+      },
+      { timezone: TIMEZONE }
+    );
+  } catch (error) {
+    console.error('[CRON APPOINTMENTS] Error iniciando schedulers:', error.message);
   }
 }
 
@@ -222,4 +288,6 @@ module.exports = {
   initActiveSchedules,
   executeScheduledPost,
   schedulePost,
+  startAppointmentSchedulers,
+  stopAppointmentSchedulers,
 };

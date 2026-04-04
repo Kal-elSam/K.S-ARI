@@ -25,6 +25,7 @@ function messageFromUnknownError(error: unknown, fallback: string): string {
 export function useSettingsForm() {
   const [businessName, setBusinessName] = useState<string>("Clínica ARI Demo");
   const [slogan, setSlogan] = useState<string>("");
+  const [ownerPhone, setOwnerPhone] = useState<string>("");
   const [businessType, setBusinessType] = useState<BusinessType>("Consultorio");
   const [customBusinessType, setCustomBusinessType] = useState<string>("");
   const [startTime, setStartTime] = useState<string>("09:00");
@@ -59,6 +60,7 @@ export function useSettingsForm() {
 
         setBusinessName(config.name);
         setSlogan(config.slogan || "");
+        setOwnerPhone(config.owner_phone || "");
         const typeFromApi = apiTypeToUI(config.type);
         setBusinessType(typeFromApi.select);
         setCustomBusinessType(typeFromApi.custom);
@@ -72,6 +74,7 @@ export function useSettingsForm() {
         setLastPersistedConfig({
           ...config,
           slogan: config.slogan || "",
+          owner_phone: config.owner_phone || "",
           active_announcement: config.active_announcement || null,
           accent_color: config.accent_color || defaultAccentColor,
           services: Array.isArray(config.services) ? config.services : [],
@@ -99,6 +102,7 @@ export function useSettingsForm() {
     return {
       name: businessName,
       slogan,
+      owner_phone: ownerPhone,
       type: uiTypeToAPI(businessType, customBusinessType),
       start_hour: timeToHour(startTime),
       end_hour: timeToHour(endTime),
@@ -116,6 +120,7 @@ export function useSettingsForm() {
     businessType,
     customBusinessType,
     endTime,
+    ownerPhone,
     services,
     slogan,
     startTime,
@@ -222,6 +227,8 @@ export function useSettingsForm() {
     setBusinessName,
     slogan,
     setSlogan,
+    ownerPhone,
+    setOwnerPhone,
     businessType,
     setBusinessType,
     customBusinessType,

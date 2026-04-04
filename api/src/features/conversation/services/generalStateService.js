@@ -3,6 +3,7 @@ const { buildSystemPrompt } = require('../../../businessConfig');
 const { callAIWithTools } = require('../../../infrastructure/groqClient');
 const { sendWhatsAppMessage } = require('../../../whatsapp/whatsapp');
 const { trimHistory } = require('../../../shared/ai/chatHistory');
+const { pool } = require('../../../core/db');
 
 function normalizeSpanishText(text) {
   return text
@@ -35,6 +36,19 @@ async function handleGeneralState(convId, from, businessId, currentState, contex
     console.log('🧠 Consultando a Groq llama-3.3-70b-versatile...');
     const aiMessage = await callAIWithTools(systemPrompt, messages, [], { temperature: 0.7 });
     let aiResponse = typeof aiMessage.content === 'string' ? aiMessage.content : '';
+
+    const nombreMatch = aiResponse.match(/\[NOMBRE:([^\]]+)\]/);
+    if (nombreMatch) {
+      const clientName = nombreMatch[1].trim();
+      if (clientName) {
+        await updateConversationContext(convId, { clientName });
+        await pool.query(
+          'UPDATE conversations SET client_name = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+          [clientName, convId]
+        );
+      }
+      aiResponse = aiResponse.replace(/\[NOMBRE:[^\]]+\]/, '').trim();
+    }
 
     if (currentState === 'NEW_LEAD') {
       console.log('🔄 Estado avanza: NEW_LEAD → QUALIFYING');

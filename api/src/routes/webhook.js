@@ -1,7 +1,7 @@
 const { getOrCreateConversation } = require('../whatsapp/conversation');
 const { sendWhatsAppMessage } = require('../whatsapp/whatsapp');
 const { getBusinessConfig } = require('../businessConfig');
-const { handleBookingFlow, handleGeneralState } = require('../whatsapp/webhookHandlers');
+const { handleClientMessage, handleOwnerMessage } = require('../whatsapp/webhookHandlers');
 
 /**
  * @param {import('express').Express} app
@@ -55,16 +55,23 @@ function registerWebhookRoutes(app) {
 
           try {
             const conversation = await getOrCreateConversation(from);
-            const { id: convId, state: currentState, context, business_id: businessId } = conversation;
+            const { state: currentState, business_id: businessId } = conversation;
             console.log(`⚙️  Estado actual: ${currentState}`);
 
-            if (currentState === 'READY_TO_BOOK') {
-              const config = await getBusinessConfig(businessId);
-              await handleBookingFlow(convId, from, businessId, context, userMessage, config);
+            const config = await getBusinessConfig(businessId);
+            const isOwner = config.owner_phone
+              && (
+                String(config.owner_phone) === from
+                || String(config.owner_phone) === `52${from}`
+                || from === `52${String(config.owner_phone)}`
+              );
+
+            if (isOwner) {
+              await handleOwnerMessage(from, businessId, userMessage, config);
               continue;
             }
 
-            await handleGeneralState(convId, from, businessId, currentState, context, userMessage);
+            await handleClientMessage(conversation, from, businessId, userMessage, config);
           } catch (internalError) {
             console.error('[CRÍTICO INTERNO] Fallo en procesamiento:', internalError.message);
             await sendWhatsAppMessage(from, 'En este momento no puedo procesar tu mensaje, intenta en unos minutos.');

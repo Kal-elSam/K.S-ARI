@@ -192,13 +192,14 @@ function registerDashboardRoutes(app) {
 
       const query = `
       INSERT INTO business_config (
-        business_id, name, slogan, type, start_hour, end_hour, tone, welcome_message, active_announcement, services
+        business_id, name, slogan, owner_phone, type, start_hour, end_hour, tone, welcome_message, active_announcement, services
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
       ON CONFLICT (business_id) DO UPDATE
       SET
         name = EXCLUDED.name,
         slogan = EXCLUDED.slogan,
+        owner_phone = EXCLUDED.owner_phone,
         type = EXCLUDED.type,
         start_hour = EXCLUDED.start_hour,
         end_hour = EXCLUDED.end_hour,
@@ -214,6 +215,7 @@ function registerDashboardRoutes(app) {
         n.businessId,
         n.name,
         n.slogan,
+        n.owner_phone,
         n.type,
         n.start_hour,
         n.end_hour,
